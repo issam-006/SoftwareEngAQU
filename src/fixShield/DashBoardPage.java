@@ -1,27 +1,18 @@
-package javafxx;
+package fixShield;
 
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
-import javafx.scene.control.Button;
 import javafx.scene.control.Label;
-import javafx.scene.control.ProgressBar;
-import javafx.scene.layout.BorderPane;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
-import javafx.scene.layout.VBox;
+import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.stage.Stage;
 
 import oshi.SystemInfo;
-import oshi.hardware.CentralProcessor;
-import oshi.hardware.GlobalMemory;
-import oshi.hardware.GraphicsCard;
-import oshi.hardware.HWDiskStore;
-import oshi.hardware.HardwareAbstractionLayer;
+import oshi.hardware.*;
 import oshi.software.os.FileSystem;
 import oshi.software.os.OperatingSystem;
 import oshi.software.os.OSFileStore;
@@ -35,6 +26,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 public class DashBoardPage extends Application {
+
+    private Stage primaryStage;
 
     // ========== OSHI core ==========
     private SystemInfo systemInfo;
@@ -79,6 +72,8 @@ public class DashBoardPage extends Application {
     @Override
     public void start(Stage stage) {
 
+        this.primaryStage = stage;
+
         // ---------- OSHI init ----------
         systemInfo = new SystemInfo();
         hal = systemInfo.getHardware();
@@ -116,22 +111,22 @@ public class DashBoardPage extends Application {
 
         root.setTop(header);
         BorderPane.setAlignment(header, Pos.TOP_LEFT);
-        BorderPane.setMargin(header, new Insets(0, 0, 20, 5));
+        BorderPane.setMargin(header, new Insets(0, 0, 16, 0));
 
         // ---------- Top meters (CPU / RAM / GPU) ----------
         cpuCard = new MeterCard("CPU");
         ramCard = new MeterCard("RAM");
         gpuCard = new MeterCard("GPU");
 
-        HBox mainRow = new HBox(16);
-        mainRow.setAlignment(Pos.CENTER);
-        mainRow.getChildren().addAll(cpuCard.root, ramCard.root, gpuCard.root);
-        HBox.setHgrow(cpuCard.root, Priority.ALWAYS);
-        HBox.setHgrow(ramCard.root, Priority.ALWAYS);
-        HBox.setHgrow(gpuCard.root, Priority.ALWAYS);
+        HBox mainRow = new HBox(18);
+        mainRow.setAlignment(Pos.CENTER_LEFT);
+        mainRow.getChildren().addAll(cpuCard.getRoot(), ramCard.getRoot(), gpuCard.getRoot());
+        HBox.setHgrow(cpuCard.getRoot(), Priority.ALWAYS);
+        HBox.setHgrow(ramCard.getRoot(), Priority.ALWAYS);
+        HBox.setHgrow(gpuCard.getRoot(), Priority.ALWAYS);
 
         // ---------- Physical disks row ----------
-        HBox disksRow = new HBox(16);
+        HBox disksRow = new HBox(18);
         disksRow.setAlignment(Pos.CENTER_LEFT);
 
         physicalCards = new PhysicalDiskCard[diskStores.length];
@@ -139,71 +134,61 @@ public class DashBoardPage extends Application {
             HWDiskStore store = diskStores[i];
             PhysicalDiskCard card = new PhysicalDiskCard(i, store);
             physicalCards[i] = card;
-            disksRow.getChildren().add(card.root);
-            HBox.setHgrow(card.root, Priority.ALWAYS);
+            disksRow.getChildren().add(card.getRoot());
+            HBox.setHgrow(card.getRoot(), Priority.ALWAYS);
         }
 
-        // ---------- Actions row 1 ----------
-        HBox actionsRow1 = new HBox(16);
-        actionsRow1.setAlignment(Pos.CENTER_LEFT);
-
+        // ---------- Actions (tools) grid ----------
         ActionCard freeRamCard = new ActionCard("Free RAM", "Clean memory and free resources", "Run");
-        freeRamCard.button.setOnAction(e -> runFreeRam());
+        freeRamCard.getButton().setOnAction(e -> runFreeRam());
 
         ActionCard optimizeDiskCard = new ActionCard("Optimize Disk", "Clean and optimize disk usage", "Run");
-        optimizeDiskCard.button.setOnAction(e -> runOptimizeDisk());
+        optimizeDiskCard.getButton().setOnAction(e -> runOptimizeDisk());
 
         ActionCard optimizeNetCard = new ActionCard("Optimize Network", "Flush DNS & reset network tweaks", "Run");
-        optimizeNetCard.button.setOnAction(e -> runOptimizeNetwork());
+        optimizeNetCard.getButton().setOnAction(e -> runOptimizeNetwork());
 
         ActionCard optimizeUiCard = new ActionCard("Optimize UI", "Reduce UI lag & visual effects", "Run");
-        optimizeUiCard.button.setOnAction(e -> runOptimizeUi());
-
-        actionsRow1.getChildren().addAll(
-                freeRamCard.root,
-                optimizeDiskCard.root,
-                optimizeNetCard.root,
-                optimizeUiCard.root
-        );
-        HBox.setHgrow(freeRamCard.root, Priority.ALWAYS);
-        HBox.setHgrow(optimizeDiskCard.root, Priority.ALWAYS);
-        HBox.setHgrow(optimizeNetCard.root, Priority.ALWAYS);
-        HBox.setHgrow(optimizeUiCard.root, Priority.ALWAYS);
-
-        // ---------- Actions row 2 ----------
-        HBox actionsRow2 = new HBox(16);
-        actionsRow2.setAlignment(Pos.CENTER_LEFT);
+        optimizeUiCard.getButton().setOnAction(e -> runOptimizeUi());
 
         ActionCard scanFixCard = new ActionCard("Scan & Fix Files", "Scan system and fix corrupted files", "Scan");
-        scanFixCard.button.setOnAction(e -> runScanAndFix());
+        scanFixCard.getButton().setOnAction(e -> runScanAndFix());
 
         ActionCard modesCard = new ActionCard("Power Modes", "Switch power / balanced / performance", "Open");
-        modesCard.button.setOnAction(e -> runModes());
+        modesCard.getButton().setOnAction(e -> runModes());
 
         ActionCard allInOneCard = new ActionCard("All in One", "Run full optimization package", "Boost");
-        allInOneCard.button.setOnAction(e -> runAllInOne());
+        allInOneCard.getButton().setOnAction(e -> runAllInOne());
 
-        actionsRow2.getChildren().addAll(
-                scanFixCard.root,
-                modesCard.root,
-                allInOneCard.root
-        );
-        HBox.setHgrow(scanFixCard.root, Priority.ALWAYS);
-        HBox.setHgrow(modesCard.root, Priority.ALWAYS);
-        HBox.setHgrow(allInOneCard.root, Priority.ALWAYS);
+        GridPane toolsGrid = new GridPane();
+        toolsGrid.setHgap(18);
+        toolsGrid.setVgap(18);
+        toolsGrid.setPadding(new Insets(12, 0, 0, 0));
 
-        // ---------- Center layout ----------
-        VBox centerBox = new VBox(18);
-        centerBox.getChildren().addAll(mainRow, disksRow, actionsRow1, actionsRow2);
+        toolsGrid.add(freeRamCard.getRoot(),   0, 0);
+        toolsGrid.add(optimizeDiskCard.getRoot(), 1, 0);
+        toolsGrid.add(optimizeNetCard.getRoot(),  2, 0);
+
+        toolsGrid.add(scanFixCard.getRoot(),   0, 1);
+        toolsGrid.add(modesCard.getRoot(),     1, 1);
+        toolsGrid.add(allInOneCard.getRoot(),  2, 1);
+
+        for (int i = 0; i < 3; i++) {
+            ColumnConstraints col = new ColumnConstraints();
+            col.setHgrow(Priority.ALWAYS);
+            col.setPercentWidth(33.33);
+            toolsGrid.getColumnConstraints().add(col);
+        }
+
+        VBox centerBox = new VBox(22);
         centerBox.setFillWidth(true);
+        centerBox.getChildren().addAll(mainRow, disksRow, toolsGrid);
 
         root.setCenter(centerBox);
 
         Scene scene = new Scene(root, 1280, 720);
         stage.setTitle("FX Shield - System Monitor & Optimizer");
         stage.setScene(scene);
-
-        // تكبير النافذة تلقائياً عند التشغيل
         stage.setMaximized(true);
         stage.show();
 
@@ -212,9 +197,9 @@ public class DashBoardPage extends Application {
             String gpuName = detectGpuNameFromOSHI();
             Platform.runLater(() -> {
                 if (gpuName == null || gpuName.isBlank()) {
-                    gpuCard.titleLabel.setText("GPU - Unknown");
+                    gpuCard.getTitleLabel().setText("GPU - Unknown");
                 } else {
-                    gpuCard.titleLabel.setText("GPU - " + gpuName);
+                    gpuCard.getTitleLabel().setText("GPU - " + gpuName);
                 }
             });
         });
@@ -238,7 +223,6 @@ public class DashBoardPage extends Application {
         try {
             long now = System.currentTimeMillis();
 
-            // 1) CPU: نحدث كل 500ms
             double cpuPercentLocal = lastCpuPercent;
             if (lastCpuSampleTime == 0L || now - lastCpuSampleTime >= 500) {
                 double measured = readCpuPercentFromOSHI();
@@ -249,10 +233,8 @@ public class DashBoardPage extends Application {
                 cpuPercentLocal = lastCpuPercent;
             }
 
-            // 2) RAM: نقرأ في كل دورة (خفيفة)
             RamSnapshot ramSnap = readRamSnapshotFromOSHI();
 
-            // 3) DISK: نحدث الـ Active / usage كل 1000ms
             PhysicalDiskSnapshot[] diskSnapsLocal = lastDiskSnaps;
             if (diskSnapsLocal == null || now - lastDiskSampleTime >= 1000) {
                 LogicalUsage logicalUsage = readLogicalUsageFromOSHI();
@@ -261,7 +243,6 @@ public class DashBoardPage extends Application {
                 lastDiskSampleTime = now;
             }
 
-            // 4) GPU: هجين Counters + nvidia-smi كل 1000ms
             int gpuUsageLocal = lastGpuUsage;
             if (now - lastGpuUpdateTime >= 1000) {
                 gpuUsageLocal = readGpuUsageHybrid();
@@ -371,7 +352,7 @@ public class DashBoardPage extends Application {
             snap.model = disk.getModel();
             snap.sizeGb = disk.getSize() / (1024.0 * 1024 * 1024);
 
-            long transferTime = disk.getTransferTime(); // ms of I/O since boot
+            long transferTime = disk.getTransferTime();
             long prevTransfer = prevDiskTransferTime[i];
             long deltaTransfer = transferTime - prevTransfer;
 
@@ -535,16 +516,16 @@ public class DashBoardPage extends Application {
 
     private void updateCpuUI(double percent) {
         if (percent < 0) {
-            cpuCard.valueLabel.setText("N/A");
-            cpuCard.extraLabel.setText("System CPU usage");
-            cpuCard.bar.setProgress(0);
+            cpuCard.getValueLabel().setText("N/A");
+            cpuCard.getExtraLabel().setText("System CPU usage");
+            cpuCard.getBar().setProgress(0);
             styleAsUnavailable(cpuCard);
             return;
         }
         String text = percentFormat.format(percent) + " %";
-        cpuCard.valueLabel.setText(text);
-        cpuCard.extraLabel.setText("System CPU usage");
-        cpuCard.bar.setProgress(clamp01(percent / 100.0));
+        cpuCard.getValueLabel().setText(text);
+        cpuCard.getExtraLabel().setText("System CPU usage");
+        cpuCard.getBar().setProgress(clamp01(percent / 100.0));
         styleByUsage(cpuCard, percent);
     }
 
@@ -554,25 +535,25 @@ public class DashBoardPage extends Application {
         String extra = gbFormat.format(snap.usedGb) + " / " +
                 gbFormat.format(snap.totalGb) + " GB";
 
-        ramCard.valueLabel.setText(percentText);
-        ramCard.extraLabel.setText(extra);
-        ramCard.bar.setProgress(clamp01(percent / 100.0));
+        ramCard.getValueLabel().setText(percentText);
+        ramCard.getExtraLabel().setText(extra);
+        ramCard.getBar().setProgress(clamp01(percent / 100.0));
         styleByUsage(ramCard, percent);
     }
 
     private void updateGpuUI(int usage) {
         if (usage < 0) {
-            gpuCard.valueLabel.setText("N/A");
-            gpuCard.extraLabel.setText("GPU usage not available");
-            gpuCard.bar.setProgress(0);
+            gpuCard.getValueLabel().setText("N/A");
+            gpuCard.getExtraLabel().setText("GPU usage not available");
+            gpuCard.getBar().setProgress(0);
             styleAsUnavailable(gpuCard);
             return;
         }
         double percent = usage;
         String percentText = percentFormat.format(percent) + " %";
-        gpuCard.valueLabel.setText(percentText);
-        gpuCard.extraLabel.setText("GPU utilization");
-        gpuCard.bar.setProgress(clamp01(percent / 100.0));
+        gpuCard.getValueLabel().setText(percentText);
+        gpuCard.getExtraLabel().setText("GPU utilization");
+        gpuCard.getBar().setProgress(clamp01(percent / 100.0));
         styleByUsage(gpuCard, percent);
     }
 
@@ -588,21 +569,21 @@ public class DashBoardPage extends Application {
                 String spaceText = gbFormat.format(snap.usedGb) + " / " +
                         gbFormat.format(snap.totalGb) + " GB";
 
-                card.usedValueLabel.setText(usedText);
-                card.spaceLabel.setText(spaceText);
-                card.usedBar.setProgress(clamp01(usedPercent / 100.0));
+                card.getUsedValueLabel().setText(usedText);
+                card.getSpaceLabel().setText(spaceText);
+                card.getUsedBar().setProgress(clamp01(usedPercent / 100.0));
                 styleByUsage(card, usedPercent, true);
             } else {
-                card.usedValueLabel.setText("Used: N/A");
-                card.spaceLabel.setText("Size: " + gbFormat.format(snap.sizeGb) + " GB");
-                card.usedBar.setProgress(0);
+                card.getUsedValueLabel().setText("Used: N/A");
+                card.getSpaceLabel().setText("Size: " + gbFormat.format(snap.sizeGb) + " GB");
+                card.getUsedBar().setProgress(0);
                 styleAsUnavailable(card, true);
             }
 
             double activePercent = snap.activePercent;
             String activeText = "Active: " + percentFormat.format(activePercent) + " %";
-            card.activeValueLabel.setText(activeText);
-            card.activeBar.setProgress(clamp01(activePercent / 100.0));
+            card.getActiveValueLabel().setText(activeText);
+            card.getActiveBar().setProgress(clamp01(activePercent / 100.0));
             styleByUsage(card, activePercent, false);
         }
     }
@@ -611,47 +592,47 @@ public class DashBoardPage extends Application {
 
     private void styleByUsage(MeterCard card, double percent) {
         String color = usageColor(percent);
-        card.valueLabel.setTextFill(Color.web(color));
+        card.getValueLabel().setTextFill(Color.web(color));
         String barStyle = "-fx-accent: " + color + ";" +
                 "-fx-control-inner-background: #020617;";
-        card.bar.setStyle(barStyle);
+        card.getBar().setStyle(barStyle);
     }
 
     private void styleAsUnavailable(MeterCard card) {
         String color = "#9ca3af";
-        card.valueLabel.setTextFill(Color.web(color));
+        card.getValueLabel().setTextFill(Color.web(color));
         String barStyle = "-fx-accent: " + color + ";" +
                 "-fx-control-inner-background: #020617;";
-        card.bar.setStyle(barStyle);
+        card.getBar().setStyle(barStyle);
     }
 
     private void styleByUsage(PhysicalDiskCard card, double percent, boolean forUsedBar) {
         String color = usageColor(percent);
         if (forUsedBar) {
-            card.usedValueLabel.setTextFill(Color.web(color));
+            card.getUsedValueLabel().setTextFill(Color.web(color));
             String barStyle = "-fx-accent: " + color + ";" +
                     "-fx-control-inner-background: #020617;";
-            card.usedBar.setStyle(barStyle);
+            card.getUsedBar().setStyle(barStyle);
         } else {
-            card.activeValueLabel.setTextFill(Color.web(color));
+            card.getActiveValueLabel().setTextFill(Color.web(color));
             String barStyle = "-fx-accent: " + color + ";" +
                     "-fx-control-inner-background: #020617;";
-            card.activeBar.setStyle(barStyle);
+            card.getActiveBar().setStyle(barStyle);
         }
     }
 
     private void styleAsUnavailable(PhysicalDiskCard card, boolean forUsedBar) {
         String color = "#9ca3af";
         if (forUsedBar) {
-            card.usedValueLabel.setTextFill(Color.web(color));
+            card.getUsedValueLabel().setTextFill(Color.web(color));
             String barStyle = "-fx-accent: " + color + ";" +
                     "-fx-control-inner-background: #020617;";
-            card.usedBar.setStyle(barStyle);
+            card.getUsedBar().setStyle(barStyle);
         } else {
-            card.activeValueLabel.setTextFill(Color.web(color));
+            card.getActiveValueLabel().setTextFill(Color.web(color));
             String barStyle = "-fx-accent: " + color + ";" +
                     "-fx-control-inner-background: #020617;";
-            card.activeBar.setStyle(barStyle);
+            card.getActiveBar().setStyle(barStyle);
         }
     }
 
@@ -671,7 +652,7 @@ public class DashBoardPage extends Application {
         return v;
     }
 
-    // ==================== Actions (TODO: سكربتات حقيقية) ====================
+    // ==================== Actions ====================
 
     private void runFreeRam() {
         System.out.println("[ACTION] Free RAM clicked");
@@ -706,7 +687,7 @@ public class DashBoardPage extends Application {
 
     private void runOptimizeDisk() {
         System.out.println("[ACTION] Optimize Disk clicked");
-        // TODO: هنا تضيف سكربت defrag / trim حسب فكرتك
+        // TODO: سكربت defrag / trim
     }
 
     private void runOptimizeNetwork() {
@@ -741,17 +722,17 @@ public class DashBoardPage extends Application {
 
     private void runOptimizeUi() {
         System.out.println("[ACTION] Optimize UI clicked");
-        // TODO: سكربت يقلل visual effects مثلاً عبر registry
+        // TODO: سكربت يقلل visual effects
     }
 
     private void runScanAndFix() {
         System.out.println("[ACTION] Scan & Fix Files clicked");
-        // TODO: ممكن تشغل sfc /scannow أو DISM حسب فكرتك
+        // TODO: sfc /scannow أو DISM
     }
 
     private void runModes() {
         System.out.println("[ACTION] Modes clicked");
-        // TODO: تفتح نافذة صغيرة لاختيار power / balanced / performance
+        PowerModeDialog.show(primaryStage);
     }
 
     private void runAllInOne() {
@@ -760,147 +741,6 @@ public class DashBoardPage extends Application {
         runOptimizeDisk();
         runOptimizeNetwork();
         runOptimizeUi();
-    }
-
-    // ==================== UI inner classes ====================
-
-    private static class MeterCard {
-        VBox root;
-        Label titleLabel;
-        Label valueLabel;
-        Label extraLabel;
-        ProgressBar bar;
-
-        MeterCard(String titleText) {
-            titleLabel = new Label(titleText);
-            titleLabel.setTextFill(Color.web("#93c5fd"));
-            titleLabel.setFont(Font.font("Segoe UI", 18));
-            titleLabel.setStyle("-fx-font-weight: bold;");
-
-            valueLabel = new Label("0 %");
-            valueLabel.setTextFill(Color.web("#e5e7eb"));
-            valueLabel.setFont(Font.font("Segoe UI", 16));
-
-            bar = new ProgressBar(0);
-            bar.setPrefWidth(260);
-            bar.setStyle(
-                    "-fx-accent: #22c55e;" +
-                            "-fx-control-inner-background: #020617;"
-            );
-
-            extraLabel = new Label("");
-            extraLabel.setTextFill(Color.web("#9ca3af"));
-            extraLabel.setFont(Font.font("Segoe UI", 12));
-
-            root = new VBox();
-            root.setSpacing(10);
-            root.setAlignment(Pos.CENTER_LEFT);
-            root.setPadding(new Insets(15));
-            root.setStyle(
-                    "-fx-background-color: linear-gradient(to bottom right, #020617, #111827);" +
-                            "-fx-background-radius: 18;" +
-                            "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.4), 18, 0.1, 0, 8);"
-            );
-            root.setMaxWidth(Double.MAX_VALUE);
-            root.getChildren().addAll(titleLabel, valueLabel, bar, extraLabel);
-        }
-    }
-
-    private static class PhysicalDiskCard {
-        VBox root;
-        Label titleLabel;
-        Label usedValueLabel;
-        Label spaceLabel;
-        Label activeValueLabel;
-        ProgressBar usedBar;
-        ProgressBar activeBar;
-
-        PhysicalDiskCard(int index, HWDiskStore store) {
-            String titleText = "Disk " + index + " - " + store.getModel();
-            titleLabel = new Label(titleText);
-            titleLabel.setTextFill(Color.web("#93c5fd"));
-            titleLabel.setFont(Font.font("Segoe UI", 15));
-            titleLabel.setStyle("-fx-font-weight: bold;");
-
-            usedValueLabel = new Label("Used: N/A");
-            usedValueLabel.setTextFill(Color.web("#e5e7eb"));
-            usedValueLabel.setFont(Font.font("Segoe UI", 13));
-
-            usedBar = new ProgressBar(0);
-            usedBar.setPrefWidth(240);
-            usedBar.setStyle(
-                    "-fx-accent: #22c55e;" +
-                            "-fx-control-inner-background: #020617;"
-            );
-
-            double sizeGb = store.getSize() / (1024.0 * 1024 * 1024);
-            spaceLabel = new Label("Size: " + new DecimalFormat("0.0").format(sizeGb) + " GB");
-            spaceLabel.setTextFill(Color.web("#9ca3af"));
-            spaceLabel.setFont(Font.font("Segoe UI", 11));
-
-            activeValueLabel = new Label("Active: 0 %");
-            activeValueLabel.setTextFill(Color.web("#e5e7eb"));
-            activeValueLabel.setFont(Font.font("Segoe UI", 13));
-
-            activeBar = new ProgressBar(0);
-            activeBar.setPrefWidth(240);
-            activeBar.setStyle(
-                    "-fx-accent: #22c55e;" +
-                            "-fx-control-inner-background: #020617;"
-            );
-
-            root = new VBox();
-            root.setSpacing(8);
-            root.setAlignment(Pos.CENTER_LEFT);
-            root.setPadding(new Insets(12));
-            root.setStyle(
-                    "-fx-background-color: linear-gradient(to bottom right, #020617, #111827);" +
-                            "-fx-background-radius: 18;" +
-                            "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.4), 18, 0.1, 0, 8);"
-            );
-            root.setMaxWidth(Double.MAX_VALUE);
-            root.getChildren().addAll(titleLabel, usedValueLabel, usedBar, spaceLabel, activeValueLabel, activeBar);
-        }
-    }
-
-    private static class ActionCard {
-        VBox root;
-        Label titleLabel;
-        Label descLabel;
-        Button button;
-
-        ActionCard(String title, String description, String buttonText) {
-            titleLabel = new Label(title);
-            titleLabel.setTextFill(Color.web("#93c5fd"));
-            titleLabel.setFont(Font.font("Segoe UI", 14));
-            titleLabel.setStyle("-fx-font-weight: bold;");
-
-            descLabel = new Label(description);
-            descLabel.setTextFill(Color.web("#9ca3af"));
-            descLabel.setFont(Font.font("Segoe UI", 11));
-            descLabel.setWrapText(true);
-
-            button = new Button(buttonText);
-            button.setFont(Font.font("Segoe UI", 12));
-            button.setStyle(
-                    "-fx-background-color: #2563eb;" +
-                            "-fx-text-fill: white;" +
-                            "-fx-background-radius: 999;" +
-                            "-fx-padding: 4 12 4 12;"
-            );
-
-            root = new VBox();
-            root.setSpacing(8);
-            root.setAlignment(Pos.TOP_LEFT);
-            root.setPadding(new Insets(10));
-            root.setStyle(
-                    "-fx-background-color: linear-gradient(to bottom right, #020617, #111827);" +
-                            "-fx-background-radius: 16;" +
-                            "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.35), 12, 0.1, 0, 5);"
-            );
-            root.setMaxWidth(Double.MAX_VALUE);
-            root.getChildren().addAll(titleLabel, descLabel, button);
-        }
     }
 
     public static void main(String[] args) {
