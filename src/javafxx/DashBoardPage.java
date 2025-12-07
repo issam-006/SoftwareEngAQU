@@ -1,19 +1,21 @@
 package javafxx;
 
-import com.sun.management.OperatingSystemMXBean;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
+import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.stage.Stage;
+
 import oshi.SystemInfo;
 import oshi.hardware.CentralProcessor;
 import oshi.hardware.GlobalMemory;
@@ -26,7 +28,6 @@ import oshi.software.os.OSFileStore;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.lang.management.ManagementFactory;
 import java.text.DecimalFormat;
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -35,7 +36,7 @@ import java.util.concurrent.TimeUnit;
 
 public class DashBoardPage extends Application {
 
-    // OSHI objects
+    // ========== OSHI core ==========
     private SystemInfo systemInfo;
     private HardwareAbstractionLayer hal;
     private CentralProcessor cpu;
@@ -45,28 +46,17 @@ public class DashBoardPage extends Application {
     private HWDiskStore[] diskStores;
     private GraphicsCard[] gpus;
 
-    // آخر قراءة CPU + وقتها
-    private volatile double lastCpuPercent = 0.0;
-    private volatile long lastCpuSampleTime = 0L;
-
-    // آخر سنابشوت للأقراص + وقته
-    private volatile PhysicalDiskSnapshot[] lastDiskSnaps = null;
-    private volatile long lastDiskSampleTime = 0L;
-
-
     // CPU ticks snapshot
     private long[] prevCpuTicks;
 
-    // Disk transfer-timestamps
+    // Disk transfer timestamps
     private long[] prevDiskTransferTime;
     private long[] prevDiskTimestamp;
 
-    private OperatingSystemMXBean osBean;
-
+    // UI cards
     private MeterCard cpuCard;
     private MeterCard ramCard;
     private MeterCard gpuCard;
-
     private PhysicalDiskCard[] physicalCards;
 
     private final DecimalFormat percentFormat = new DecimalFormat("0.0");
@@ -74,15 +64,22 @@ public class DashBoardPage extends Application {
 
     private ScheduledExecutorService executor;
 
-    // GPU caching
+    // GPU caching / state
     private volatile int lastGpuUsage = -1;
     private volatile long lastGpuUpdateTime = 0L;
     private volatile boolean hasNvidiaGpu = false;
 
+    // Smoothing / caching CPU & disks
+    private volatile double lastCpuPercent = 0.0;
+    private volatile long lastCpuSampleTime = 0L;
+
+    private volatile PhysicalDiskSnapshot[] lastDiskSnaps = null;
+    private volatile long lastDiskSampleTime = 0L;
+
     @Override
     public void start(Stage stage) {
 
-        // OSHI init
+        // ---------- OSHI init ----------
         systemInfo = new SystemInfo();
         hal = systemInfo.getHardware();
         cpu = hal.getProcessor();
@@ -107,34 +104,34 @@ public class DashBoardPage extends Application {
             prevDiskTimestamp[i] = now;
         }
 
-        osBean = ManagementFactory.getPlatformMXBean(OperatingSystemMXBean.class);
-
+        // ---------- UI root ----------
         BorderPane root = new BorderPane();
         root.setPadding(new Insets(20));
         root.setStyle("-fx-background-color: linear-gradient(to bottom, #020617, #0f172a);");
 
-        Label header = new Label("FX Shield - Physical Disk & System Monitor");
+        Label header = new Label("FX Shield - System Monitor & Optimizer");
         header.setTextFill(Color.web("#e5e7eb"));
-        header.setFont(Font.font("Segoe UI", 24));
+        header.setFont(Font.font("Segoe UI", 26));
         header.setStyle("-fx-font-weight: bold;");
 
         root.setTop(header);
         BorderPane.setAlignment(header, Pos.TOP_LEFT);
         BorderPane.setMargin(header, new Insets(0, 0, 20, 5));
 
+        // ---------- Top meters (CPU / RAM / GPU) ----------
         cpuCard = new MeterCard("CPU");
         ramCard = new MeterCard("RAM");
         gpuCard = new MeterCard("GPU");
 
-        HBox mainRow = new HBox();
-        mainRow.setSpacing(20);
-        mainRow.setAlignment(Pos.CENTER_LEFT);
-        mainRow.getChildren().add(cpuCard.root);
-        mainRow.getChildren().add(ramCard.root);
-        mainRow.getChildren().add(gpuCard.root);
+        HBox mainRow = new HBox(16);
+        mainRow.setAlignment(Pos.CENTER);
+        mainRow.getChildren().addAll(cpuCard.root, ramCard.root, gpuCard.root);
+        HBox.setHgrow(cpuCard.root, Priority.ALWAYS);
+        HBox.setHgrow(ramCard.root, Priority.ALWAYS);
+        HBox.setHgrow(gpuCard.root, Priority.ALWAYS);
 
-        HBox disksRow = new HBox();
-        disksRow.setSpacing(20);
+        // ---------- Physical disks row ----------
+        HBox disksRow = new HBox(16);
         disksRow.setAlignment(Pos.CENTER_LEFT);
 
         physicalCards = new PhysicalDiskCard[diskStores.length];
@@ -143,21 +140,74 @@ public class DashBoardPage extends Application {
             PhysicalDiskCard card = new PhysicalDiskCard(i, store);
             physicalCards[i] = card;
             disksRow.getChildren().add(card.root);
+            HBox.setHgrow(card.root, Priority.ALWAYS);
         }
 
-        VBox centerBox = new VBox();
-        centerBox.setSpacing(20);
-        centerBox.getChildren().add(mainRow);
-        centerBox.getChildren().add(disksRow);
+        // ---------- Actions row 1 ----------
+        HBox actionsRow1 = new HBox(16);
+        actionsRow1.setAlignment(Pos.CENTER_LEFT);
+
+        ActionCard freeRamCard = new ActionCard("Free RAM", "Clean memory and free resources", "Run");
+        freeRamCard.button.setOnAction(e -> runFreeRam());
+
+        ActionCard optimizeDiskCard = new ActionCard("Optimize Disk", "Clean and optimize disk usage", "Run");
+        optimizeDiskCard.button.setOnAction(e -> runOptimizeDisk());
+
+        ActionCard optimizeNetCard = new ActionCard("Optimize Network", "Flush DNS & reset network tweaks", "Run");
+        optimizeNetCard.button.setOnAction(e -> runOptimizeNetwork());
+
+        ActionCard optimizeUiCard = new ActionCard("Optimize UI", "Reduce UI lag & visual effects", "Run");
+        optimizeUiCard.button.setOnAction(e -> runOptimizeUi());
+
+        actionsRow1.getChildren().addAll(
+                freeRamCard.root,
+                optimizeDiskCard.root,
+                optimizeNetCard.root,
+                optimizeUiCard.root
+        );
+        HBox.setHgrow(freeRamCard.root, Priority.ALWAYS);
+        HBox.setHgrow(optimizeDiskCard.root, Priority.ALWAYS);
+        HBox.setHgrow(optimizeNetCard.root, Priority.ALWAYS);
+        HBox.setHgrow(optimizeUiCard.root, Priority.ALWAYS);
+
+        // ---------- Actions row 2 ----------
+        HBox actionsRow2 = new HBox(16);
+        actionsRow2.setAlignment(Pos.CENTER_LEFT);
+
+        ActionCard scanFixCard = new ActionCard("Scan & Fix Files", "Scan system and fix corrupted files", "Scan");
+        scanFixCard.button.setOnAction(e -> runScanAndFix());
+
+        ActionCard modesCard = new ActionCard("Power Modes", "Switch power / balanced / performance", "Open");
+        modesCard.button.setOnAction(e -> runModes());
+
+        ActionCard allInOneCard = new ActionCard("All in One", "Run full optimization package", "Boost");
+        allInOneCard.button.setOnAction(e -> runAllInOne());
+
+        actionsRow2.getChildren().addAll(
+                scanFixCard.root,
+                modesCard.root,
+                allInOneCard.root
+        );
+        HBox.setHgrow(scanFixCard.root, Priority.ALWAYS);
+        HBox.setHgrow(modesCard.root, Priority.ALWAYS);
+        HBox.setHgrow(allInOneCard.root, Priority.ALWAYS);
+
+        // ---------- Center layout ----------
+        VBox centerBox = new VBox(18);
+        centerBox.getChildren().addAll(mainRow, disksRow, actionsRow1, actionsRow2);
+        centerBox.setFillWidth(true);
 
         root.setCenter(centerBox);
 
-        Scene scene = new Scene(root, 1200, 520);
-        stage.setTitle("FX Shield - Physical Disk & System Monitor");
+        Scene scene = new Scene(root, 1280, 720);
+        stage.setTitle("FX Shield - System Monitor & Optimizer");
         stage.setScene(scene);
+
+        // تكبير النافذة تلقائياً عند التشغيل
+        stage.setMaximized(true);
         stage.show();
 
-        // GPU name + نوع الكرت (هل هو NVIDIA؟)
+        // ---------- GPU name detection (async) ----------
         Thread gpuNameThread = new Thread(() -> {
             String gpuName = detectGpuNameFromOSHI();
             Platform.runLater(() -> {
@@ -171,7 +221,7 @@ public class DashBoardPage extends Application {
         gpuNameThread.setDaemon(true);
         gpuNameThread.start();
 
-        // تحديث سريع: كل 200ms لــ CPU/RAM وDisk busy (مع كاش للـ GPU كل 1 ثانية)
+        // ---------- periodic sampler ----------
         executor = Executors.newSingleThreadScheduledExecutor();
         executor.scheduleAtFixedRate(this::sampleAndUpdate, 0, 200, TimeUnit.MILLISECONDS);
 
@@ -182,25 +232,27 @@ public class DashBoardPage extends Application {
         });
     }
 
+    // ==================== Sampling & smoothing ====================
+
     private void sampleAndUpdate() {
         try {
             long now = System.currentTimeMillis();
 
-            // ---------- 1) CPU: تحديث كل 500ms فقط ----------
+            // 1) CPU: نحدث كل 500ms
             double cpuPercentLocal = lastCpuPercent;
             if (lastCpuSampleTime == 0L || now - lastCpuSampleTime >= 500) {
                 double measured = readCpuPercentFromOSHI();
-                if (measured >= 0) {          // لو القراءة مش -1
+                if (measured >= 0) {
                     lastCpuPercent = measured;
                     lastCpuSampleTime = now;
                 }
                 cpuPercentLocal = lastCpuPercent;
             }
 
-            // ---------- 2) RAM: نقرأها في كل دورة (خفيفة) ----------
+            // 2) RAM: نقرأ في كل دورة (خفيفة)
             RamSnapshot ramSnap = readRamSnapshotFromOSHI();
 
-            // ---------- 3) Disk: تحديث كل 1000ms ----------
+            // 3) DISK: نحدث الـ Active / usage كل 1000ms
             PhysicalDiskSnapshot[] diskSnapsLocal = lastDiskSnaps;
             if (diskSnapsLocal == null || now - lastDiskSampleTime >= 1000) {
                 LogicalUsage logicalUsage = readLogicalUsageFromOSHI();
@@ -209,9 +261,7 @@ public class DashBoardPage extends Application {
                 lastDiskSampleTime = now;
             }
 
-            // ---------- 4) GPU: كما هو (كل 1000ms) ----------
-            // ---------- 4) GPU: قراءة شاملة لكل الأنواع (كل 1000ms) ----------
-            // ---------- 4) GPU: هجين (Counters + nvidia-smi) كل 1000ms ----------
+            // 4) GPU: هجين Counters + nvidia-smi كل 1000ms
             int gpuUsageLocal = lastGpuUsage;
             if (now - lastGpuUpdateTime >= 1000) {
                 gpuUsageLocal = readGpuUsageHybrid();
@@ -238,8 +288,7 @@ public class DashBoardPage extends Application {
         }
     }
 
-
-    // ==================== CPU / RAM من OSHI ====================
+    // ==================== CPU / RAM ====================
 
     private double readCpuPercentFromOSHI() {
         long[] newTicks = cpu.getSystemCpuLoadTicks();
@@ -269,7 +318,7 @@ public class DashBoardPage extends Application {
         return snap;
     }
 
-    // ==================== Logical usage (file systems) ====================
+    // ==================== Logical disk usage ====================
 
     private static class LogicalUsage {
         double totalGb;
@@ -295,8 +344,6 @@ public class DashBoardPage extends Application {
         return usage;
     }
 
-
-
     // ==================== Physical disks snapshots ====================
 
     private static class PhysicalDiskSnapshot {
@@ -317,14 +364,13 @@ public class DashBoardPage extends Application {
 
         for (int i = 0; i < diskStores.length; i++) {
             HWDiskStore disk = diskStores[i];
-            disk.updateAttributes();  // تحديث إحصائيات OSHI
+            disk.updateAttributes();
 
             PhysicalDiskSnapshot snap = new PhysicalDiskSnapshot();
             snap.index = i;
             snap.model = disk.getModel();
             snap.sizeGb = disk.getSize() / (1024.0 * 1024 * 1024);
 
-            // Active time (busy %) = deltaTransferTime / deltaWallTime
             long transferTime = disk.getTransferTime(); // ms of I/O since boot
             long prevTransfer = prevDiskTransferTime[i];
             long deltaTransfer = transferTime - prevTransfer;
@@ -344,7 +390,6 @@ public class DashBoardPage extends Application {
             prevDiskTransferTime[i] = transferTime;
             prevDiskTimestamp[i] = now;
 
-            // Usage:
             if (singlePhysical) {
                 snap.totalGb = logicalUsage.totalGb;
                 snap.usedGb = logicalUsage.usedGb;
@@ -356,7 +401,7 @@ public class DashBoardPage extends Application {
                 snap.totalGb = snap.sizeGb;
                 snap.usedGb = 0;
                 snap.usedPercent = 0;
-                snap.hasUsage = false; // ما ربطنا بارتيشنات بهذا الديسك
+                snap.hasUsage = false;
             }
 
             snaps[i] = snap;
@@ -365,14 +410,14 @@ public class DashBoardPage extends Application {
         return snaps;
     }
 
-    // ==================== GPU: اسم من OSHI + استعمال من nvidia-smi (إن وجد) ====================
+    // ==================== GPU (OSHI + Counters + nvidia-smi) ====================
 
     private String detectGpuNameFromOSHI() {
         if (gpus.length == 0) {
             hasNvidiaGpu = false;
             return null;
         }
-        GraphicsCard primary = gpus[0]; // أغلب الأجهزة عندها كرت واحد مهم
+        GraphicsCard primary = gpus[0];
         String name = primary.getName();
         String vendor = primary.getVendor();
         String combined = (vendor == null ? "" : vendor + " ") + (name == null ? "" : name);
@@ -380,70 +425,10 @@ public class DashBoardPage extends Application {
         String lower = combined.toLowerCase();
         hasNvidiaGpu = lower.contains("nvidia");
 
-        System.out.println("GPU detected by OSHI: " + combined + " | NVIDIA? " + hasNvidiaGpu);
+        System.out.println("GPU detected: " + combined + " | NVIDIA? " + hasNvidiaGpu);
         return combined.trim();
     }
 
-    // قراءة GPU لجميع الأنواع (Intel / AMD / NVIDIA) عبر Performance Counters
-    private int readGpuUsageUniversal() {
-        try {
-            String counterPath = "\\\\GPU Engine(*)\\\\Utilization Percentage";
-
-            String psCmd =
-                    "(Get-Counter '" + counterPath + "').CounterSamples " +
-                            "| Select-Object -ExpandProperty CookedValue";
-
-            ProcessBuilder pb = new ProcessBuilder(
-                    "powershell",
-                    "-Command",
-                    psCmd
-            );
-            pb.redirectErrorStream(true);
-            Process p = pb.start();
-
-            BufferedReader reader =
-                    new BufferedReader(new InputStreamReader(p.getInputStream()));
-            String line;
-            double max = -1.0;
-
-            boolean anyNumberRead = false;
-
-            while ((line = reader.readLine()) != null) {
-                line = line.trim();
-                if (line.isEmpty()) continue;
-
-                try {
-                    double value = Double.parseDouble(line);
-                    anyNumberRead = true;
-                    if (value > max) max = value;
-                } catch (NumberFormatException ignore) {
-                    // Ignore non-numeric lines
-                }
-            }
-
-            reader.close();
-            p.waitFor();
-
-            // Debug لمعرفة إذا كان ويندوز لا يعطي أي قيمة
-            if (!anyNumberRead) {
-                System.out.println("[GPU] No values returned by GPU counters.");
-                return -1;
-            }
-
-            if (max < 0) {
-                return -1;
-            }
-
-            int usage = (int) Math.round(max);
-            return Math.max(0, Math.min(usage, 100));
-
-        } catch (Exception ex) {
-            System.out.println("[GPU] Exception: " + ex.getMessage());
-            return -1;
-        }
-    }
-
-    // 1) نحاول نقرأ GPU من Performance Counters (Intel / AMD / NVIDIA)
     private int readGpuUsageFromCounters() {
         try {
             String counterPath = "\\\\GPU Engine(*)\\\\Utilization Percentage";
@@ -475,7 +460,6 @@ public class DashBoardPage extends Application {
                     anyNumberRead = true;
                     if (value > max) max = value;
                 } catch (NumberFormatException ignore) {
-                    // تجاهل أي سطر مش رقم
                 }
             }
 
@@ -483,7 +467,8 @@ public class DashBoardPage extends Application {
             p.waitFor();
 
             if (!anyNumberRead || max < 0) {
-                return -1;  // ما في قراءات صالحة
+                System.out.println("[GPU] No counter values.");
+                return -1;
             }
 
             int usage = (int) Math.round(max);
@@ -496,8 +481,6 @@ public class DashBoardPage extends Application {
         }
     }
 
-
-    // 2) قراءة من nvidia-smi (NVIDIA فقط)
     private int readGpuUsageFromNvidiaSmi() {
         String[][] candidates = new String[][]{
                 {"nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"},
@@ -532,16 +515,12 @@ public class DashBoardPage extends Application {
         return -1;
     }
 
-
-    // 3) دالة هجين: جرّب Counters أولاً، لو فشلت و في NVIDIA جرّب nvidia-smi
     private int readGpuUsageHybrid() {
-        // جرّب Windows GPU Counters أولاً
         int fromCounters = readGpuUsageFromCounters();
         if (fromCounters >= 0) {
             return fromCounters;
         }
 
-        // لو ما فيه أرقام، وجهازك عليه NVIDIA، جرّب nvidia-smi
         if (hasNvidiaGpu) {
             int fromNvidia = readGpuUsageFromNvidiaSmi();
             if (fromNvidia >= 0) {
@@ -549,13 +528,10 @@ public class DashBoardPage extends Application {
             }
         }
 
-        // لو كله فشل
         return -1;
     }
 
-
-
-    // ==================== تحديث الـ UI ====================
+    // ==================== UI update ====================
 
     private void updateCpuUI(double percent) {
         if (percent < 0) {
@@ -631,7 +607,7 @@ public class DashBoardPage extends Application {
         }
     }
 
-    // ==================== Styling ====================
+    // ==================== Styling helpers ====================
 
     private void styleByUsage(MeterCard card, double percent) {
         String color = usageColor(percent);
@@ -681,11 +657,11 @@ public class DashBoardPage extends Application {
 
     private String usageColor(double percent) {
         if (percent < 60.0) {
-            return "#60a5fa";      // أزرق
+            return "#60a5fa";      // blue
         } else if (percent < 85.0) {
-            return "#fb923c";      // برتقالي
+            return "#fb923c";      // orange
         } else {
-            return "#f97373";      // أحمر
+            return "#f97373";      // red
         }
     }
 
@@ -695,7 +671,98 @@ public class DashBoardPage extends Application {
         return v;
     }
 
-    // ==================== UI components ====================
+    // ==================== Actions (TODO: سكربتات حقيقية) ====================
+
+    private void runFreeRam() {
+        System.out.println("[ACTION] Free RAM clicked");
+
+        String psScript =
+                "$ErrorActionPreference='SilentlyContinue';" +
+                        "Write-Host 'Cleaning temp files...';" +
+                        "Remove-Item -Path $env:TEMP\\* -Recurse -Force -ErrorAction SilentlyContinue;";
+
+        try {
+            ProcessBuilder pb = new ProcessBuilder(
+                    "powershell",
+                    "-Command",
+                    psScript
+            );
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+
+            new Thread(() -> {
+                try (BufferedReader r =
+                             new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                    String line;
+                    while ((line = r.readLine()) != null) {
+                        System.out.println("[FreeRAM] " + line);
+                    }
+                } catch (Exception ignored) {}
+            }).start();
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
+    }
+
+    private void runOptimizeDisk() {
+        System.out.println("[ACTION] Optimize Disk clicked");
+        // TODO: هنا تضيف سكربت defrag / trim حسب فكرتك
+    }
+
+    private void runOptimizeNetwork() {
+        System.out.println("[ACTION] Optimize Network clicked");
+
+        String psScript =
+                "$ErrorActionPreference='SilentlyContinue';" +
+                        "ipconfig /flushdns | Out-Null;";
+
+        try {
+            ProcessBuilder pb = new ProcessBuilder(
+                    "powershell",
+                    "-Command",
+                    psScript
+            );
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+
+            new Thread(() -> {
+                try (BufferedReader r =
+                             new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                    String line;
+                    while ((line = r.readLine()) != null) {
+                        System.out.println("[NetOpt] " + line);
+                    }
+                } catch (Exception ignored) {}
+            }).start();
+        } catch (Exception ex) {
+            ex.printStackTrace();
+        }
+    }
+
+    private void runOptimizeUi() {
+        System.out.println("[ACTION] Optimize UI clicked");
+        // TODO: سكربت يقلل visual effects مثلاً عبر registry
+    }
+
+    private void runScanAndFix() {
+        System.out.println("[ACTION] Scan & Fix Files clicked");
+        // TODO: ممكن تشغل sfc /scannow أو DISM حسب فكرتك
+    }
+
+    private void runModes() {
+        System.out.println("[ACTION] Modes clicked");
+        // TODO: تفتح نافذة صغيرة لاختيار power / balanced / performance
+    }
+
+    private void runAllInOne() {
+        System.out.println("[ACTION] All in One clicked");
+        runFreeRam();
+        runOptimizeDisk();
+        runOptimizeNetwork();
+        runOptimizeUi();
+    }
+
+    // ==================== UI inner classes ====================
 
     private static class MeterCard {
         VBox root;
@@ -734,10 +801,8 @@ public class DashBoardPage extends Application {
                             "-fx-background-radius: 18;" +
                             "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.4), 18, 0.1, 0, 8);"
             );
-            root.getChildren().add(titleLabel);
-            root.getChildren().add(valueLabel);
-            root.getChildren().add(bar);
-            root.getChildren().add(extraLabel);
+            root.setMaxWidth(Double.MAX_VALUE);
+            root.getChildren().addAll(titleLabel, valueLabel, bar, extraLabel);
         }
     }
 
@@ -793,12 +858,48 @@ public class DashBoardPage extends Application {
                             "-fx-background-radius: 18;" +
                             "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.4), 18, 0.1, 0, 8);"
             );
-            root.getChildren().add(titleLabel);
-            root.getChildren().add(usedValueLabel);
-            root.getChildren().add(usedBar);
-            root.getChildren().add(spaceLabel);
-            root.getChildren().add(activeValueLabel);
-            root.getChildren().add(activeBar);
+            root.setMaxWidth(Double.MAX_VALUE);
+            root.getChildren().addAll(titleLabel, usedValueLabel, usedBar, spaceLabel, activeValueLabel, activeBar);
+        }
+    }
+
+    private static class ActionCard {
+        VBox root;
+        Label titleLabel;
+        Label descLabel;
+        Button button;
+
+        ActionCard(String title, String description, String buttonText) {
+            titleLabel = new Label(title);
+            titleLabel.setTextFill(Color.web("#93c5fd"));
+            titleLabel.setFont(Font.font("Segoe UI", 14));
+            titleLabel.setStyle("-fx-font-weight: bold;");
+
+            descLabel = new Label(description);
+            descLabel.setTextFill(Color.web("#9ca3af"));
+            descLabel.setFont(Font.font("Segoe UI", 11));
+            descLabel.setWrapText(true);
+
+            button = new Button(buttonText);
+            button.setFont(Font.font("Segoe UI", 12));
+            button.setStyle(
+                    "-fx-background-color: #2563eb;" +
+                            "-fx-text-fill: white;" +
+                            "-fx-background-radius: 999;" +
+                            "-fx-padding: 4 12 4 12;"
+            );
+
+            root = new VBox();
+            root.setSpacing(8);
+            root.setAlignment(Pos.TOP_LEFT);
+            root.setPadding(new Insets(10));
+            root.setStyle(
+                    "-fx-background-color: linear-gradient(to bottom right, #020617, #111827);" +
+                            "-fx-background-radius: 16;" +
+                            "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.35), 12, 0.1, 0, 5);"
+            );
+            root.setMaxWidth(Double.MAX_VALUE);
+            root.getChildren().addAll(titleLabel, descLabel, button);
         }
     }
 
