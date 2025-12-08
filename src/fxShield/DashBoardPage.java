@@ -272,20 +272,20 @@ public class DashBoardPage extends Application {
     }
 
     private void updateGpuUI(int usage) {
-        if (usage < 0) {
-            gpuCard.getValueLabel().setText("N/A");
-            gpuCard.getExtraLabel().setText("GPU usage not available");
-            gpuCard.getBar().setProgress(0);
-            styleAsUnavailable(gpuCard);
-            return;
-        }
         double percent = usage;
         String percentText = percentFormat.format(percent) + " %";
         gpuCard.getValueLabel().setText(percentText);
-        gpuCard.getExtraLabel().setText("GPU utilization");
+
+        if (!monitor.isGpuUsageSupported()) {
+            gpuCard.getExtraLabel().setText("GPU usage not supported on this system");
+        } else {
+            gpuCard.getExtraLabel().setText("GPU utilization");
+        }
+
         gpuCard.getBar().setProgress(clamp01(percent / 100.0));
         styleByUsage(gpuCard, percent);
     }
+
 
     private void updatePhysicalDisksUI(SystemMonitorService.PhysicalDiskSnapshot[] snaps) {
         for (int i = 0; i < snaps.length; i++) {

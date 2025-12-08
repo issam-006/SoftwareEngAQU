@@ -15,9 +15,68 @@ import java.util.concurrent.TimeUnit;
 
 public class SystemMonitorService {
 
+    // GPU state
+    private volatile boolean hasNvidiaGpu = false;
+    private volatile boolean gpuCountersAvailable = false;
+    private volatile Integer lastValidGpuUsage = null;
+
     // Public helper: قراءة Snapshot RAM فورية
     public RamSnapshot readRamOnce() {
         return readRamSnapshotFromOSHI();
+    }
+
+
+    private void initGpuInfo() {
+        List<GraphicsCard> gpuList = hal.getGraphicsCards();
+        gpus = gpuList.toArray(new GraphicsCard[0]);
+        if (gpus.length > 0) {
+            String vendorName = (gpus[0].getVendor() + " " + gpus[0].getName()).toLowerCase();
+            hasNvidiaGpu = vendorName.contains("nvidia");
+        } else {
+            hasNvidiaGpu = false;
+        }
+
+        // نجرب إذا GPU Engine counters متوفرة على هذا النظام
+        gpuCountersAvailable = probeGpuCounters();
+    }
+
+    public boolean isGpuUsageSupported() {
+        return gpuCountersAvailable || hasNvidiaGpu;
+    }
+
+    private boolean probeGpuCounters() {
+        try {
+            String psCmd =
+                    "$ErrorActionPreference='SilentlyContinue';" +
+                            "Get-Counter -ListSet 'GPU Engine' | Out-Null; " +
+                            "if ($?) { Write-Host 'OK' } else { Write-Host 'FAIL' }";
+
+            ProcessBuilder pb = new ProcessBuilder(
+                    "powershell",
+                    "-Command",
+                    psCmd
+            );
+            pb.redirectErrorStream(true);
+            Process p = pb.start();
+
+            try (BufferedReader r =
+                         new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    line = line.trim();
+                    if (line.equalsIgnoreCase("OK")) {
+                        return true;
+                    }
+                    if (line.equalsIgnoreCase("FAIL")) {
+                        return false;
+                    }
+                }
+            }
+
+            p.waitFor();
+        } catch (Exception ignored) {}
+
+        return false;
     }
 
 
@@ -53,7 +112,7 @@ public class SystemMonitorService {
     private final OperatingSystem os;
     private final FileSystem fileSystem;
     private final HWDiskStore[] diskStores;
-    private final GraphicsCard[] gpus;
+    private GraphicsCard[] gpus;
 
     private long[] prevCpuTicks;
 
@@ -65,7 +124,6 @@ public class SystemMonitorService {
     // GPU state
     private volatile int lastGpuUsage = -1;
     private volatile long lastGpuUpdateTime = 0L;
-    private volatile boolean hasNvidiaGpu = false;
     private final String gpuName;
 
     // CPU / Disk caching
@@ -302,12 +360,24 @@ public class SystemMonitorService {
     }
 
     private int readGpuUsageFromCounters() {
+        if (!gpuCountersAvailable) {
+            return -1;
+        }
+
         try {
             String counterPath = "\\\\GPU Engine(*)\\\\Utilization Percentage";
 
             String psCmd =
-                    "(Get-Counter '" + counterPath + "').CounterSamples " +
-                            "| Select-Object -ExpandProperty CookedValue";
+                    "$ErrorActionPreference='SilentlyContinue';" +
+                            "$samples = (Get-Counter '" + counterPath + "').CounterSamples;" +
+                            // الأفضل نركز على 3D engine لو موجود
+                            "$values = $samples | Where-Object { $_.InstanceName -like '*engtype_3D*' } | " +
+                            "          Select-Object -ExpandProperty CookedValue;" +
+                            "if (-not $values) { " +
+                            "  $values = $samples | Select-Object -ExpandProperty CookedValue; " +
+                            "}" +
+                            "$max = ($values | Measure-Object -Maximum).Maximum;" +
+                            "if ($max -eq $null) { Write-Host 'NA' } else { Write-Host [int][Math]::Round($max) }";
 
             ProcessBuilder pb = new ProcessBuilder(
                     "powershell",
@@ -317,40 +387,30 @@ public class SystemMonitorService {
             pb.redirectErrorStream(true);
             Process p = pb.start();
 
-            BufferedReader reader =
-                    new BufferedReader(new InputStreamReader(p.getInputStream()));
-            String line;
-            double max = -1.0;
-            boolean anyNumberRead = false;
-
-            while ((line = reader.readLine()) != null) {
-                line = line.trim();
-                if (line.isEmpty()) continue;
-
-                try {
-                    double value = Double.parseDouble(line);
-                    anyNumberRead = true;
-                    if (value > max) max = value;
-                } catch (NumberFormatException ignore) {
+            try (BufferedReader r =
+                         new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    line = line.trim();
+                    if (line.isEmpty()) continue;
+                    if (line.equalsIgnoreCase("NA")) {
+                        return -1;
+                    }
+                    try {
+                        int v = Integer.parseInt(line);
+                        if (v < 0) v = 0;
+                        if (v > 100) v = 100;
+                        return v;
+                    } catch (NumberFormatException ignore) {}
                 }
             }
 
-            reader.close();
             p.waitFor();
-
-            if (!anyNumberRead || max < 0) {
-                System.out.println("[GPU] No counter values.");
-                return -1;
-            }
-
-            int usage = (int) Math.round(max);
-            if (usage < 0) usage = 0;
-            if (usage > 100) usage = 100;
-            return usage;
         } catch (Exception ex) {
             System.out.println("[GPU] Counter exception: " + ex.getMessage());
-            return -1;
         }
+
+        return -1;
     }
 
     private int readGpuUsageFromNvidiaSmi() {
@@ -388,18 +448,30 @@ public class SystemMonitorService {
     }
 
     private int readGpuUsageHybrid() {
-        int fromCounters = readGpuUsageFromCounters();
-        if (fromCounters >= 0) {
-            return fromCounters;
-        }
+        int usage = -1;
 
-        if (hasNvidiaGpu) {
+        // 1) نحاول performance counters أولاً (كل الـ vendors)
+        usage = readGpuUsageFromCounters();
+
+        // 2) لو مافي قيمة و في NVIDIA، نستعين بـ nvidia-smi
+        if (usage < 0 && hasNvidiaGpu) {
             int fromNvidia = readGpuUsageFromNvidiaSmi();
             if (fromNvidia >= 0) {
-                return fromNvidia;
+                usage = fromNvidia;
             }
         }
 
-        return -1;
+        if (usage >= 0) {
+            lastValidGpuUsage = usage;
+            return usage;
+        }
+
+        // 3) لو هالمرة فشلنا لكن عندنا قيمة سابقة، رجعها
+        if (lastValidGpuUsage != null) {
+            return lastValidGpuUsage;
+        }
+
+        // 4) آخر حل: رجّع 0 بدل -1 عشان الواجهة ما تقول "not available"
+        return 0;
     }
 }
