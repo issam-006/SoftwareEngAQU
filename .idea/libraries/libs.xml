@@ -1,0 +1,14 @@
+<component name="libraryTable">
+  <library name="libs">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/libs/oshi-core-6.4.4.jar!/" />
+      <root url="jar://$PROJECT_DIR$/libs/jna-platform-5.13.0.jar!/" />
+      <root url="jar://$PROJECT_DIR$/libs/slf4j-api-2.0.7.jar!/" />
+      <root url="jar://$PROJECT_DIR$/libs/jna-5.13.0.jar!/" />
+      <root url="jar://$PROJECT_DIR$/libs/slf4j-simple-2.0.7.jar!/" />
+      <root url="jar://$PROJECT_DIR$/libs/gson-2.11.0.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
