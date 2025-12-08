@@ -1,4 +1,4 @@
-package fixShield;
+package fxShield;
 
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -10,11 +10,11 @@ import javafx.scene.text.Font;
 
 public class MeterCard {
 
-    private final VBox root;
-    private final Label titleLabel;
-    private final Label valueLabel;
-    private final Label extraLabel;
-    private final ProgressBar bar;
+    private VBox root;
+    private Label titleLabel;
+    private Label valueLabel;
+    private Label extraLabel;
+    private ProgressBar bar;
 
     public MeterCard(String titleText) {
         titleLabel = new Label(titleText);
@@ -22,7 +22,8 @@ public class MeterCard {
         titleLabel.setFont(Font.font("Segoe UI", 18));
         titleLabel.setStyle("-fx-font-weight: bold;");
 
-        valueLabel = new Label("0 %");
+        valueLabel = new Label("Loading...");
+        extraLabel = new Label("Waiting for first sample...");
         valueLabel.setTextFill(Color.web("#e5e7eb"));
         valueLabel.setFont(Font.font("Segoe UI", 16));
 
@@ -51,9 +52,23 @@ public class MeterCard {
         root.getChildren().addAll(titleLabel, valueLabel, bar, extraLabel);
     }
 
-    public VBox getRoot() { return root; }
-    public Label getTitleLabel() { return titleLabel; }
-    public Label getValueLabel() { return valueLabel; }
-    public Label getExtraLabel() { return extraLabel; }
-    public ProgressBar getBar() { return bar; }
+    public VBox getRoot() {
+        return root;
+    }
+
+    public Label getTitleLabel() {
+        return titleLabel;
+    }
+
+    public Label getValueLabel() {
+        return valueLabel;
+    }
+
+    public Label getExtraLabel() {
+        return extraLabel;
+    }
+
+    public ProgressBar getBar() {
+        return bar;
+    }
 }

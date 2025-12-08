@@ -1,4 +1,4 @@
-package fixShield;
+package fxShield;
 
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -7,22 +7,23 @@ import javafx.scene.control.ProgressBar;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
-import oshi.hardware.HWDiskStore;
 
 import java.text.DecimalFormat;
 
 public class PhysicalDiskCard {
 
-    private final VBox root;
-    private final Label titleLabel;
-    private final Label usedValueLabel;
-    private final Label spaceLabel;
-    private final Label activeValueLabel;
-    private final ProgressBar usedBar;
-    private final ProgressBar activeBar;
 
-    public PhysicalDiskCard(int index, HWDiskStore store) {
-        String titleText = "Disk " + index + " - " + store.getModel();
+
+    private VBox root;
+    private Label titleLabel;
+    private Label usedValueLabel;
+    private Label spaceLabel;
+    private Label activeValueLabel;
+    private ProgressBar usedBar;
+    private ProgressBar activeBar;
+
+    public PhysicalDiskCard(int index, String model, double sizeGb) {
+        String titleText = "Disk " + index + " - " + model;
         titleLabel = new Label(titleText);
         titleLabel.setTextFill(Color.web("#93c5fd"));
         titleLabel.setFont(Font.font("Segoe UI", 15));
@@ -39,7 +40,6 @@ public class PhysicalDiskCard {
                         "-fx-control-inner-background: #020617;"
         );
 
-        double sizeGb = store.getSize() / (1024.0 * 1024 * 1024);
         spaceLabel = new Label("Size: " + new DecimalFormat("0.0").format(sizeGb) + " GB");
         spaceLabel.setTextFill(Color.web("#9ca3af"));
         spaceLabel.setFont(Font.font("Segoe UI", 11));
@@ -69,10 +69,27 @@ public class PhysicalDiskCard {
         root.getChildren().addAll(titleLabel, usedValueLabel, usedBar, spaceLabel, activeValueLabel, activeBar);
     }
 
-    public VBox getRoot() { return root; }
-    public Label getUsedValueLabel() { return usedValueLabel; }
-    public Label getSpaceLabel() { return spaceLabel; }
-    public Label getActiveValueLabel() { return activeValueLabel; }
-    public ProgressBar getUsedBar() { return usedBar; }
-    public ProgressBar getActiveBar() { return activeBar; }
+    public VBox getRoot() {
+        return root;
+    }
+
+    public Label getUsedValueLabel() {
+        return usedValueLabel;
+    }
+
+    public Label getSpaceLabel() {
+        return spaceLabel;
+    }
+
+    public Label getActiveValueLabel() {
+        return activeValueLabel;
+    }
+
+    public ProgressBar getUsedBar() {
+        return usedBar;
+    }
+
+    public ProgressBar getActiveBar() {
+        return activeBar;
+    }
 }

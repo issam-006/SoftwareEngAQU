@@ -1,4 +1,4 @@
-package fixShield;
+package fxShield;
 
 import javafx.animation.*;
 import javafx.geometry.Insets;
@@ -13,20 +13,19 @@ import javafx.scene.text.Font;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
-import javafx.util.Duration;
 
 import java.util.prefs.Preferences;
 
 public class PowerModeDialog {
-
-    private static final String PREF_NODE = "fxshield";
-    private static final String PREF_KEY_POWER_MODE = "powerMode";
 
     private enum PowerMode {
         PERFORMANCE,
         BALANCED,
         QUIET
     }
+
+    private static final String PREF_NODE = "fxshield";
+    private static final String PREF_KEY_POWER_MODE = "powerMode";
 
     public static void show(Stage owner) {
         PowerMode currentMode = loadSavedMode();
@@ -60,36 +59,6 @@ public class PowerModeDialog {
 
         VBox titleBox = new VBox(4, title, sub);
 
-        Button closeBtn = new Button("✕");
-        closeBtn.setOnAction(e -> dialog.close());
-        closeBtn.setStyle(
-                "-fx-background-color: transparent;" +
-                        "-fx-text-fill: #9ca3af;" +
-                        "-fx-font-size: 20px;" +
-                        "-fx-cursor: hand;"
-        );
-        closeBtn.setOnMouseEntered(e ->
-                closeBtn.setStyle(
-                        "-fx-background-color: transparent;" +
-                                "-fx-text-fill: #ef4444;" +
-                                "-fx-font-size: 20px;" +
-                                "-fx-cursor: hand;"
-                )
-        );
-        closeBtn.setOnMouseExited(e ->
-                closeBtn.setStyle(
-                        "-fx-background-color: transparent;" +
-                                "-fx-text-fill: #9ca3af;" +
-                                "-fx-font-size: 20px;" +
-                                "-fx-cursor: hand;"
-                )
-        );
-
-        HBox topBar = new HBox(titleBox, closeBtn);
-        topBar.setAlignment(Pos.CENTER_LEFT);
-        HBox.setHgrow(titleBox, Priority.ALWAYS);
-        topBar.setSpacing(10);
-        root.setTop(topBar);
 
         ModeCard performance = new ModeCard(
                 "Performance Mode",
@@ -108,13 +77,15 @@ public class PowerModeDialog {
         );
 
         ModeCard[] cards = {performance, balanced, quiet};
+
         for (ModeCard c : cards) {
             if (c.mode == currentMode) {
                 setSelected(cards, c);
             }
         }
-        for (ModeCard c : cards) {
-            c.setOnMouseClicked(e -> setSelected(cards, c));
+
+        for (ModeCard card : cards) {
+            card.setOnMouseClicked(e -> setSelected(cards, card));
         }
 
         VBox modesBox = new VBox(12, performance, balanced, quiet);
@@ -133,6 +104,7 @@ public class PowerModeDialog {
                         "-fx-padding: 4 18 4 18;" +
                         "-fx-cursor: hand;"
         );
+
         cancelBtn.setOnMouseEntered(e ->
                 cancelBtn.setStyle(
                         "-fx-background-color: #1f2937;" +
@@ -145,6 +117,7 @@ public class PowerModeDialog {
                                 "-fx-cursor: hand;"
                 )
         );
+
         cancelBtn.setOnMouseExited(e ->
                 cancelBtn.setStyle(
                         "-fx-background-color: transparent;" +
@@ -162,8 +135,8 @@ public class PowerModeDialog {
         applyBtn.setOnAction(e -> {
             ModeCard selected = getSelected(cards);
             if (selected != null) {
-                saveMode(selected.mode);
                 System.out.println("[POWER MODE] Selected: " + selected.getTitleText());
+                saveMode(selected.mode);
             }
             dialog.close();
         });
@@ -174,6 +147,7 @@ public class PowerModeDialog {
                         "-fx-padding: 4 22 4 22;" +
                         "-fx-cursor: hand;"
         );
+
         applyBtn.setOnMouseEntered(e ->
                 applyBtn.setStyle(
                         "-fx-background-color: #1d4ed8;" +
@@ -183,6 +157,7 @@ public class PowerModeDialog {
                                 "-fx-cursor: hand;"
                 )
         );
+
         applyBtn.setOnMouseExited(e ->
                 applyBtn.setStyle(
                         "-fx-background-color: #2563eb;" +
@@ -196,6 +171,7 @@ public class PowerModeDialog {
         HBox bottomButtons = new HBox(10, cancelBtn, applyBtn);
         bottomButtons.setAlignment(Pos.CENTER_RIGHT);
         bottomButtons.setPadding(new Insets(10, 0, 0, 0));
+
         root.setBottom(bottomButtons);
 
         Scene scene = new Scene(root, 700, 390);
@@ -203,17 +179,18 @@ public class PowerModeDialog {
         dialog.setScene(scene);
         dialog.centerOnScreen();
 
+        // initial state for animation
         root.setOpacity(0);
         root.setScaleX(0.95);
         root.setScaleY(0.95);
 
         dialog.show();
 
-        FadeTransition fade = new FadeTransition(Duration.millis(220), root);
+        FadeTransition fade = new FadeTransition(javafx.util.Duration.millis(220), root);
         fade.setFromValue(0);
         fade.setToValue(1);
 
-        ScaleTransition scale = new ScaleTransition(Duration.millis(220), root);
+        ScaleTransition scale = new ScaleTransition(javafx.util.Duration.millis(220), root);
         scale.setFromX(0.95);
         scale.setFromY(0.95);
         scale.setToX(1);
@@ -264,10 +241,10 @@ public class PowerModeDialog {
         ModeCard(String titleText, String descText, PowerMode mode) {
             this.mode = mode;
 
-            setSpacing(8);
-            setPadding(new Insets(14));
-            setAlignment(Pos.TOP_LEFT);
-            setStyle(
+            this.setSpacing(8);
+            this.setPadding(new Insets(14));
+            this.setAlignment(Pos.TOP_LEFT);
+            this.setStyle(
                     "-fx-background-color: #020617;" +
                             "-fx-background-radius: 16;"
             );
@@ -289,11 +266,11 @@ public class PowerModeDialog {
             HBox header = new HBox(10, radio, title);
             header.setAlignment(Pos.CENTER_LEFT);
 
-            getChildren().addAll(header, desc);
+            this.getChildren().addAll(header, desc);
 
-            setOnMouseEntered(e -> {
+            this.setOnMouseEntered(e -> {
                 if (!selected) {
-                    setStyle(
+                    this.setStyle(
                             "-fx-background-color: #020617;" +
                                     "-fx-background-radius: 16;" +
                                     "-fx-border-color: #1f2937;" +
@@ -301,9 +278,9 @@ public class PowerModeDialog {
                     );
                 }
             });
-            setOnMouseExited(e -> {
+            this.setOnMouseExited(e -> {
                 if (!selected) {
-                    setStyle(
+                    this.setStyle(
                             "-fx-background-color: #020617;" +
                                     "-fx-background-radius: 16;"
                     );
@@ -316,7 +293,7 @@ public class PowerModeDialog {
             if (sel) {
                 radio.setText("●");
                 radio.setTextFill(Color.web("#3b82f6"));
-                setStyle(
+                this.setStyle(
                         "-fx-background-color: #020617;" +
                                 "-fx-background-radius: 16;" +
                                 "-fx-border-color: #3b82f6;" +
@@ -326,14 +303,19 @@ public class PowerModeDialog {
             } else {
                 radio.setText("○");
                 radio.setTextFill(Color.web("#9ca3af"));
-                setStyle(
+                this.setStyle(
                         "-fx-background-color: #020617;" +
                                 "-fx-background-radius: 16;"
                 );
             }
         }
 
-        boolean isSelected() { return selected; }
-        String getTitleText() { return title.getText(); }
+        boolean isSelected() {
+            return selected;
+        }
+
+        String getTitleText() {
+            return title.getText();
+        }
     }
 }

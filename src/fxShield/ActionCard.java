@@ -1,4 +1,4 @@
-package fixShield;
+package fxShield;
 
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -10,10 +10,10 @@ import javafx.scene.text.Font;
 
 public class ActionCard {
 
-    private final VBox root;
-    private final Label titleLabel;
-    private final Label descLabel;
-    private final Button button;
+    private VBox root;
+    private Label titleLabel;
+    private Label descLabel;
+    private Button button;
 
     public ActionCard(String title, String description, String buttonText) {
         titleLabel = new Label(title);
@@ -49,6 +49,11 @@ public class ActionCard {
         root.getChildren().addAll(titleLabel, descLabel, button);
     }
 
-    public VBox getRoot() { return root; }
-    public Button getButton() { return button; }
+    public VBox getRoot() {
+        return root;
+    }
+
+    public Button getButton() {
+        return button;
+    }
 }
