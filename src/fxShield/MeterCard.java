@@ -17,58 +17,58 @@ public class MeterCard {
     private ProgressBar bar;
 
     public MeterCard(String titleText) {
+
+        // ===== TITLE =====
         titleLabel = new Label(titleText);
-        titleLabel.setTextFill(Color.web("#93c5fd"));
-        titleLabel.setFont(Font.font("Segoe UI", 18));
+        titleLabel.setTextFill(Color.web("#e9d8ff"));
+        titleLabel.setFont(Font.font("Segoe UI", 20));
         titleLabel.setStyle("-fx-font-weight: bold;");
 
+        // ===== VALUE =====
         valueLabel = new Label("Loading...");
+        valueLabel.setTextFill(Color.web("#f5e8ff"));
+        valueLabel.setFont(Font.font("Segoe UI", 18));
+
+        // ===== EXTRA TEXT =====
         extraLabel = new Label("Waiting for first sample...");
-        valueLabel.setTextFill(Color.web("#e5e7eb"));
-        valueLabel.setFont(Font.font("Segoe UI", 16));
+        extraLabel.setTextFill(Color.web("#cbb8ff"));
+        extraLabel.setFont(Font.font("Segoe UI", 13));
 
+        // ===== PROGRESS BAR =====
         bar = new ProgressBar(0);
-        bar.setPrefWidth(320);
+        bar.setPrefWidth(260);
         bar.setStyle(
-                "-fx-accent: #22c55e;" +
-                        "-fx-control-inner-background: #020617;"
+                "-fx-accent: #a78bfa;" +                      // بنفسجي فاتح
+                        "-fx-control-inner-background: rgba(255,255,255,0.08);" // شفاف ناعم
         );
 
-        extraLabel = new Label("");
-        extraLabel.setTextFill(Color.web("#9ca3af"));
-        extraLabel.setFont(Font.font("Segoe UI", 12));
+        // ===== CARD CONTAINER =====
+        root = new VBox(14);
+        root.setAlignment(Pos.CENTER);
+        root.setPadding(new Insets(22));
 
-        root = new VBox();
-        root.setSpacing(10);
-        root.setAlignment(Pos.CENTER_LEFT);
-        root.setPadding(new Insets(18));
         root.setStyle(
-                "-fx-background-color: linear-gradient(to bottom right, #020617, #111827);" +
-                        "-fx-background-radius: 20;" +
-                        "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.4), 18, 0.1, 0, 8);"
+                "-fx-background-color: rgba(17,13,34,0.55);" + // خلفية بنفسجية داكنة شفافة
+                        "-fx-background-radius: 28;" +
+                        "-fx-border-radius: 28;" +
+                        "-fx-border-color: rgba(255,255,255,0.10);" +
+                        "-fx-border-width: 1;" +
+                        "-fx-effect: dropshadow(gaussian, rgba(157,110,255,0.28), 25, 0.25, 0, 0);" // purple glow
         );
-        root.setMinHeight(170);
+
+        root.setMinHeight(240);
+        root.setMinWidth(260);
+        root.setPrefWidth(0);
         root.setMaxWidth(Double.MAX_VALUE);
+
+        // ترتيب العناصر
         root.getChildren().addAll(titleLabel, valueLabel, bar, extraLabel);
     }
 
-    public VBox getRoot() {
-        return root;
-    }
-
-    public Label getTitleLabel() {
-        return titleLabel;
-    }
-
-    public Label getValueLabel() {
-        return valueLabel;
-    }
-
-    public Label getExtraLabel() {
-        return extraLabel;
-    }
-
-    public ProgressBar getBar() {
-        return bar;
-    }
+    // ===== Getters =====
+    public VBox getRoot() { return root; }
+    public Label getTitleLabel() { return titleLabel; }
+    public Label getValueLabel() { return valueLabel; }
+    public Label getExtraLabel() { return extraLabel; }
+    public ProgressBar getBar() { return bar; }
 }

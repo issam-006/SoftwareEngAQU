@@ -77,31 +77,41 @@ public class DashBoardPage extends Application {
     private void launchNormalUi(Stage stage, RemoteConfig config) {
         // ===== root / background =====
         root = new BorderPane();
-        root.setPadding(new Insets(20));
+        root.setPadding(new Insets(32, 22, 12, 22));
         root.setStyle("-fx-background-color: linear-gradient(to bottom, #020617, #0f172a);");
 
-        // ===== Header =====
-        Label header = new Label("FX Shield - System Monitor & Optimizer");
-        header.setTextFill(Color.web("#e5e7eb"));
-        header.setFont(Font.font("Segoe UI", 26));
-        header.setStyle("-fx-font-weight: bold;");
+        // ===== Header + Badge =====
+        Label appTitle = new Label("Fx Shield - System Monitor & Optimizer ");
+        appTitle.setFont(Font.font("Segoe UI", 22));
+        appTitle.setStyle("-fx-font-weight: bold;");
+        appTitle.setTextFill(Color.web("#93C5FD"));
+        appTitle.setPadding(new Insets(0, 0, 20, 0)); // مسافة بسيطة فقط
 
-        root.setTop(header);
-        BorderPane.setAlignment(header, Pos.TOP_LEFT);
-        BorderPane.setMargin(header, new Insets(0, 0, 16, 0));
+        root.setTop(appTitle);
+        BorderPane.setAlignment(appTitle, Pos.TOP_LEFT);
+
+
+
+
+
 
         // ===== Top meters =====
         cpuCard = new MeterCard("CPU");
         ramCard = new MeterCard("RAM");
         gpuCard = new MeterCard("GPU");
 
+
         HBox mainRow = new HBox(18);
         mainRow.setAlignment(Pos.CENTER_LEFT);
+        PhysicalDiskCard topDiskCard = new PhysicalDiskCard(0, "Loading Disk...", 0);
         mainRow.getChildren().addAll(
                 cpuCard.getRoot(),
                 ramCard.getRoot(),
-                gpuCard.getRoot()
+                gpuCard.getRoot(),
+                topDiskCard.getRoot()
         );
+
+        HBox.setHgrow(topDiskCard.getRoot(), Priority.ALWAYS);
         HBox.setHgrow(cpuCard.getRoot(), Priority.ALWAYS);
         HBox.setHgrow(ramCard.getRoot(), Priority.ALWAYS);
         HBox.setHgrow(gpuCard.getRoot(), Priority.ALWAYS);
@@ -110,32 +120,63 @@ public class DashBoardPage extends Application {
         disksRow = new HBox(18);
         disksRow.setAlignment(Pos.CENTER_LEFT);
 
-        // 🔹 كرت وهمي للهارد عشان يبين الشكل بالبداية
-        PhysicalDiskCard placeholderDisk = new PhysicalDiskCard(0, "Detecting disks...", 0);
-        disksRow.getChildren().add(placeholderDisk.getRoot());
-        HBox.setHgrow(placeholderDisk.getRoot(), Priority.ALWAYS);
+
 
         // ===== Action cards =====
-        ActionCard freeRamCard = new ActionCard("Free RAM", "Clean memory and free resources", "Run");
+        ActionCard freeRamCard = new ActionCard(
+                "Free RAM",
+                "Clean memory and free resources",
+                "Run",
+                "M10 2 L14 2 L8 14 L4 14 Z" // broom icon
+        );
+
+        ActionCard optimizeDiskCard = new ActionCard(
+                "Optimize Disk",
+                "Clean & minimize disk usage",
+                "Optimize",
+                "M3 5 H13 V11 H3 Z M6 8 A1 1 0 1 0 6 8.01\n" // disk icon
+        );
+
+        ActionCard optimizeNetCard = new ActionCard(
+                "Optimize Network",
+                "Flush DNS & reset tweaks",
+                "Optimize",
+                "M8 2 L10 6 L8 14 L6 6 Z M7 6 H9\n" // rocket
+        );
+
+        ActionCard scanFixCard = new ActionCard(
+                "Scan & Fix Files",
+                "Scan system and fix corrupted files",
+                "Scan",
+                "M4 4 H14 V14 H4 Z M7 7 L11 11 M11 7 L7 11" // 🔍 أيقونة بحث + X
+        );
+
+
+
+        ActionCard modesCard = new ActionCard(
+                "Power Modes",
+                "Switch power / balanced / performance",
+                "Open",
+                "M7 2 L11 8 H8 L10 14 L5 8 H8 Z\n" // ⚡ أيقونة برق
+        );
+
+
+
+        ActionCard allInOneCard = new ActionCard(
+                "One Click",
+                "Run full optimization package",
+                "Boost",
+                "M3 6 L8 2 L13 6 L13 14 H3 Z" // 🛡 أيقونة درع
+        );
+
         freeRamCard.getButton().setOnAction(e -> runFreeRam());
-
-        ActionCard optimizeDiskCard = new ActionCard("Optimize Disk", "Clean and optimize disk usage", "Run");
-        optimizeDiskCard.getButton().setOnAction(e -> runOptimizeDisk());
-
-        ActionCard optimizeNetCard = new ActionCard("Optimize Network", "Flush DNS & reset network tweaks", "Run");
         optimizeNetCard.getButton().setOnAction(e -> runOptimizeNetwork());
-
-        ActionCard optimizeUiCard = new ActionCard("Optimize UI", "Reduce UI lag & visual effects", "Run");
-        optimizeUiCard.getButton().setOnAction(e -> runOptimizeUi());
-
-        ActionCard scanFixCard = new ActionCard("Scan & Fix Files", "Scan system and fix corrupted files", "Scan");
+        optimizeDiskCard.getButton().setOnAction(e -> runOptimizeDisk());
         scanFixCard.getButton().setOnAction(e -> runScanAndFix());
-
-        ActionCard modesCard = new ActionCard("Power Modes", "Switch power / balanced / performance", "Open");
         modesCard.getButton().setOnAction(e -> runModes());
-
-        ActionCard allInOneCard = new ActionCard("All in One", "Run full optimization package", "Boost");
         allInOneCard.getButton().setOnAction(e -> runAllInOne());
+
+
 
         GridPane toolsGrid = new GridPane();
         toolsGrid.setHgap(18);
@@ -150,6 +191,23 @@ public class DashBoardPage extends Application {
         toolsGrid.add(modesCard.getRoot(),        1, 1);
         toolsGrid.add(allInOneCard.getRoot(),     2, 1);
 
+        GridPane.setHgrow(freeRamCard.getRoot(), Priority.ALWAYS);
+        GridPane.setVgrow(freeRamCard.getRoot(), Priority.ALWAYS);
+        GridPane.setHgrow(optimizeDiskCard.getRoot(), Priority.ALWAYS);
+        GridPane.setHgrow(optimizeNetCard.getRoot(), Priority.ALWAYS);
+
+        GridPane.setHgrow(scanFixCard.getRoot(), Priority.ALWAYS);
+        GridPane.setHgrow(modesCard.getRoot(), Priority.ALWAYS);
+        GridPane.setHgrow(allInOneCard.getRoot(), Priority.ALWAYS);
+
+        GridPane.setVgrow(freeRamCard.getRoot(), Priority.ALWAYS);
+        GridPane.setVgrow(optimizeDiskCard.getRoot(), Priority.ALWAYS);
+        GridPane.setVgrow(optimizeNetCard.getRoot(), Priority.ALWAYS);
+        GridPane.setVgrow(scanFixCard.getRoot(), Priority.ALWAYS);
+        GridPane.setVgrow(modesCard.getRoot(), Priority.ALWAYS);
+        GridPane.setVgrow(allInOneCard.getRoot(), Priority.ALWAYS);
+
+
         for (int i = 0; i < 3; i++) {
             ColumnConstraints col = new ColumnConstraints();
             col.setHgrow(Priority.ALWAYS);
@@ -157,11 +215,65 @@ public class DashBoardPage extends Application {
             toolsGrid.getColumnConstraints().add(col);
         }
 
-        VBox centerBox = new VBox(22);
+        // --- Purple background only for toolsGrid ---
+        VBox actionsWrapper = new VBox(28);      // مسافة أكبر بين العناصر
+        actionsWrapper.setPadding(new Insets(28, 32, 40, 32));
+// ↑  أكبر من فوق — أكبر من الجوانب — أكبر من تحت
+
+// 10 top - 26 right - 40 bottom - 26 left
+
+        actionsWrapper.setStyle(
+                "-fx-background-color: rgba(147,197,253,0.18);" +      /* Glass light blue */
+                        "-fx-background-radius: 26;" +
+                        "-fx-border-color: rgba(255,255,255,0.25);" +
+                        "-fx-border-radius: 26;" +
+                        "-fx-border-width: 1;" +
+
+                        /* Outer Glow قوي */
+                        "-fx-effect: dropshadow(gaussian, rgba(147,197,253,0.80), 1, 0.7, 0, 0)," +
+
+                        /* Inner Glow */
+                        " dropshadow(gaussian, rgba(147,197,253,0.35), 20, 0.4, 0, 0)," +
+
+                        /* Soft blur glow */
+                        " dropshadow(gaussian, rgba(147,197,253,0.55), 35, 0.5, 0, 0);"
+        );
+
+
+        actionsWrapper.setBorder(new Border(new BorderStroke(
+                Color.rgb(147, 197, 253, 0.25),   // Light blue border
+                BorderStrokeStyle.SOLID,
+                new CornerRadii(22),
+                new BorderWidths(1.4)
+        )));
+
+        Label actionsTitle = new Label("Quick Optimization Tools");
+        actionsTitle.setFont(Font.font("Segoe UI", 22));
+        actionsTitle.setTextFill(Color.web("#000000"));
+        actionsTitle.setStyle("-fx-font-weight: bold;");
+        actionsWrapper.getChildren().add(actionsTitle);
+        actionsWrapper.setBorder(new Border(new BorderStroke(
+                Color.web("#ffffff22"),
+                BorderStrokeStyle.SOLID,
+                new CornerRadii(20),
+                new BorderWidths(1)
+        )));
+
+        actionsWrapper.getChildren().add(toolsGrid);
+
+// Center layout (no background here)
+        VBox centerBox = new VBox(28);
         centerBox.setFillWidth(true);
-        centerBox.getChildren().addAll(mainRow, disksRow, toolsGrid);
+
+        centerBox.getChildren().addAll(
+                mainRow,
+                disksRow,
+                actionsWrapper
+        );
 
         root.setCenter(centerBox);
+
+
 
         Scene scene = new Scene(root, 1280, 720);
         stage.setTitle("FX Shield - System Monitor & Optimizer");
@@ -197,24 +309,33 @@ public class DashBoardPage extends Application {
                     if (gpuName == null || gpuName.isBlank()) {
                         gpuCard.getTitleLabel().setText("GPU - Unknown");
                     } else {
-                        gpuCard.getTitleLabel().setText("GPU - " + gpuName);
+                        gpuCard.getTitleLabel().setText("GPU - " + shortenGpuName(gpuName));
                     }
 
                     // 🔹 نستبدل الكرت الوهمي بالكروت الحقيقية
                     if (initialDisks != null && initialDisks.length > 0) {
                         physicalCards = new PhysicalDiskCard[initialDisks.length];
-                        disksRow.getChildren().clear();
-                        for (int i = 0; i < initialDisks.length; i++) {
-                            SystemMonitorService.PhysicalDiskSnapshot s = initialDisks[i];
-                            PhysicalDiskCard card = new PhysicalDiskCard(i, s.model, s.sizeGb);
-                            physicalCards[i] = card;
-                            disksRow.getChildren().add(card.getRoot());
-                            HBox.setHgrow(card.getRoot(), Priority.ALWAYS);
 
-                            card.getUsedValueLabel().setText("Used: Loading...");
-                            card.getActiveValueLabel().setText("Active: Loading...");
+                        disksRow.getChildren().clear();
+
+                        for (int i = 0; i < initialDisks.length; i++) {
+                            var snap = initialDisks[i];
+
+                            PhysicalDiskCard card = new PhysicalDiskCard(i, snap.model, snap.sizeGb);
+                            physicalCards[i] = card;
+
+                            if (i == 0) {
+                                // الديسك الأول → في الصف العلوي
+                                mainRow.getChildren().set(3, card.getRoot());
+                                HBox.setHgrow(card.getRoot(), Priority.ALWAYS);
+                            } else {
+                                // باقي الأقراص → تبقى في الأسفل
+                                disksRow.getChildren().add(card.getRoot());
+                                HBox.setHgrow(card.getRoot(), Priority.ALWAYS);
+                            }
                         }
-                    } else {
+
+                } else {
                         disksRow.getChildren().clear();
                         Label noDisk = new Label("No physical disks detected.");
                         noDisk.setTextFill(Color.web("#9ca3af"));
@@ -387,54 +508,52 @@ public class DashBoardPage extends Application {
     private void runFreeRam() {
         System.out.println("[ACTION] Free RAM clicked");
 
-        SystemMonitorService.RamSnapshot before;
-        if (monitor != null) {
-            before = monitor.readRamOnce();
-        } else {
-            before = null;
-        }
+        // قبل التنظيف: snapshot RAM
+        SystemMonitorService.RamSnapshot before =
+                (monitor != null ? monitor.readRamOnce() : null);
 
+        // نعرض لودنغ نفس Optimize Network
+        LoadingDialog dialog = LoadingDialog.show(
+                primaryStage,
+                "Cleaning RAM",
+                "Cleaning junk files & freeing memory..."
+        );
+
+        // سكربت PowerShell الحقيقي
         String psScript =
                 "$ErrorActionPreference='SilentlyContinue';" +
-                        "Write-Host 'Cleaning temp files...';" +
                         "Remove-Item -Path $env:TEMP\\* -Recurse -Force -ErrorAction SilentlyContinue;" +
-                        "Write-Host 'Cleaning prefetch...';" +
                         "Remove-Item -Path $env:WINDIR\\Prefetch\\* -Recurse -Force -ErrorAction SilentlyContinue;" +
-                        "Write-Host 'Cleaning recent...';" +
                         "Remove-Item -Path $env:APPDATA\\Microsoft\\Windows\\Recent\\* -Recurse -Force -ErrorAction SilentlyContinue;";
 
+        // ننفّذ على Thread منفصل
         new Thread(() -> {
             runPowerShellSync(psScript, "[FreeRAM]");
 
-            try { Thread.sleep(1200); } catch (InterruptedException ignored) {}
+            try { Thread.sleep(1200); } catch (Exception ignored) {}
 
-            SystemMonitorService.RamSnapshot after = null;
-            if (monitor != null) {
-                after = monitor.readRamOnce();
-            }
-
-            SystemMonitorService.RamSnapshot beforeFinal = before;
-            SystemMonitorService.RamSnapshot afterFinal = after;
+            SystemMonitorService.RamSnapshot after =
+                    (monitor != null ? monitor.readRamOnce() : null);
 
             Platform.runLater(() -> {
-                if (beforeFinal == null || afterFinal == null) {
-                    showActionResult("Free RAM",
-                            "Cleanup completed.\n\n(Unable to calculate RAM difference.)");
-                } else {
-                    double diffGb = beforeFinal.usedGb - afterFinal.usedGb;
-                    String msg =
-                            "Before: " + gbFormat.format(beforeFinal.usedGb) + " / " +
-                                    gbFormat.format(beforeFinal.totalGb) + " GB\n" +
-                                    "After:  " + gbFormat.format(afterFinal.usedGb) + " / " +
-                                    gbFormat.format(afterFinal.totalGb) + " GB\n\n" +
-                                    "Freed:  " + gbFormat.format(diffGb) + " GB (approx.)";
-
-                    showActionResult("Free RAM", msg);
+                if (before == null || after == null) {
+                    dialog.setDone("Cleanup completed.\n\n(Unable to detect RAM difference)");
+                    return;
                 }
+
+                double diffGb = before.usedGb - after.usedGb;
+
+                String msg =
+                        "Before: " + gbFormat.format(before.usedGb) + " / " + gbFormat.format(before.totalGb) + " GB\n" +
+                                "After:  " + gbFormat.format(after.usedGb) + " / " + gbFormat.format(after.totalGb) + " GB\n\n" +
+                                "Freed:  " + gbFormat.format(diffGb) + " GB";
+
+                dialog.setDone(msg);
             });
 
         }).start();
     }
+
 
     private void runOptimizeDisk() {
         System.out.println("[ACTION] Optimize Disk clicked");
@@ -582,4 +701,28 @@ public class DashBoardPage extends Application {
     public static void main(String[] args) {
         launch(args);
     }
+    private String shortenGpuName(String full) {
+        if (full == null || full.isBlank()) return "Unknown";
+
+        String f = full.toLowerCase();
+
+        // Intel internal GPUs
+        if (f.contains("iris")) return "Iris Xe";
+        if (f.contains("uhd")) return "UHD Graphics";
+        if (f.contains("xe")) return "Intel Xe";
+
+        // AMD internal GPUs
+        if (f.contains("vega")) return "Radeon Vega";
+
+        // NVIDIA
+        if (f.contains("rtx")) return "RTX";
+        if (f.contains("gtx")) return "GTX";
+
+        // AMD desktop cards
+        if (f.contains("radeon")) return "Radeon";
+
+        // Default
+        return full.length() > 18 ? full.substring(0, 18) + "..." : full;
+    }
+
 }
