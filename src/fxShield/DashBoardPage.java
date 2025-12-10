@@ -247,19 +247,35 @@ public class DashBoardPage extends Application {
                 new BorderWidths(1.4)
         )));
 
+        // Title
         Label actionsTitle = new Label("Quick Optimization Tools");
         actionsTitle.setFont(Font.font("Segoe UI", 22));
         actionsTitle.setTextFill(Color.web("#000000"));
         actionsTitle.setStyle("-fx-font-weight: bold;");
-        actionsWrapper.getChildren().add(actionsTitle);
-        actionsWrapper.setBorder(new Border(new BorderStroke(
-                Color.web("#ffffff22"),
-                BorderStrokeStyle.SOLID,
-                new CornerRadii(20),
-                new BorderWidths(1)
-        )));
 
+// Icons bar
+        TopBarIcons topIcons = new TopBarIcons();
+
+// Title + Icons row
+        HBox titleRow = new HBox();
+        titleRow.setAlignment(Pos.CENTER_LEFT);
+        titleRow.setPadding(new Insets(0, 0, 10, 0));
+
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        titleRow.getChildren().addAll(actionsTitle, spacer, topIcons.getRoot());
+
+// Add to wrapper
+        actionsWrapper.getChildren().add(titleRow);
+
+        // === ADD TOP BAR ICONS ===
+        TopBarIcons topBarIcons = new TopBarIcons();
+
+
+// Add tools grid
         actionsWrapper.getChildren().add(toolsGrid);
+
 
 // Center layout (no background here)
         VBox centerBox = new VBox(28);
@@ -272,6 +288,8 @@ public class DashBoardPage extends Application {
         );
 
         root.setCenter(centerBox);
+
+
 
 
 
@@ -724,5 +742,39 @@ public class DashBoardPage extends Application {
         // Default
         return full.length() > 18 ? full.substring(0, 18) + "..." : full;
     }
+
+    private StackPane createTopIcon(String svgContent) {
+        javafx.scene.shape.SVGPath icon = new javafx.scene.shape.SVGPath();
+        icon.setContent(svgContent);
+        icon.setFill(Color.web("#ffffff"));
+
+        StackPane circle = new StackPane(icon);
+        circle.setPrefSize(38, 38);
+        circle.setStyle(
+                "-fx-background-color: rgba(255,255,255,0.18);" +
+                        "-fx-background-radius: 50%;" +
+                        "-fx-cursor: hand;"
+        );
+        circle.setAlignment(Pos.CENTER);
+
+        circle.setOnMouseEntered(e ->
+                circle.setStyle(
+                        "-fx-background-color: rgba(255,255,255,0.32);" +
+                                "-fx-background-radius: 50%;" +
+                                "-fx-cursor: hand;"
+                )
+        );
+        circle.setOnMouseExited(e ->
+                circle.setStyle(
+                        "-fx-background-color: rgba(255,255,255,0.18);" +
+                                "-fx-background-radius: 50%;" +
+                                "-fx-cursor: hand;"
+                )
+        );
+
+        return circle;
+    }
+
+
 
 }

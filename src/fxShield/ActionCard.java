@@ -24,8 +24,8 @@ public class ActionCard {
         iconShape = new SVGPath();
         iconShape.setContent(svgPath);
         iconShape.setFill(Color.web("#cbd5e1"));
-        iconShape.setScaleX(0.9);
-        iconShape.setScaleY(0.9);
+        iconShape.setScaleX(1.5);
+        iconShape.setScaleY(1.5);
 
         // ===== Title =====
         titleLabel = new Label(title);
