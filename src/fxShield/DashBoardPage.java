@@ -32,6 +32,11 @@ public class DashBoardPage extends Application {
     private SystemMonitorService monitor;
     private HBox disksRow;
 
+    // placeholder container for the "active" disk card shown in the top row
+    private StackPane topDiskContainer;
+    // the disk switcher control (shows Disk 1 / N and prev/next)
+    private PhysicalDiskSwitcher diskSwitcher;
+
     @Override
     public void start(Stage stage) {
         this.primaryStage = stage;
@@ -45,27 +50,28 @@ public class DashBoardPage extends Application {
         // 🔹 وضع الصيانة
         if (config != null && "maintenance".equalsIgnoreCase(config.getAppStatus())) {
             MaintenanceDialog.show(primaryStage, config, () -> {
-                // Retry: إعادة المحاولة
+                // Retry: إعادة المحاولة (هذا الكود يشتغل في Thread منفصل)
+
                 RemoteConfig retryConfig = configService.fetchConfig();
+
+                // خرجنا من الصيانة ؟
                 if (retryConfig != null &&
                         !"maintenance".equalsIgnoreCase(retryConfig.getAppStatus())) {
-                    // خرجنا من الصيانة → نزّل الواجهة العادية
-                    launchNormalUi(primaryStage, retryConfig);
-                } else {
-                    // ما زال في صيانة
-                    MaintenanceDialog.show(primaryStage, retryConfig, null);
+
+                    // خرجنا من الصيانة → نزّل الواجهة العادية على FX Thread
+                    javafx.application.Platform.runLater(() -> {
+                        launchNormalUi(primaryStage, retryConfig);
+                    });
+
+                    // رجّع true → الديالوج يسكر نفسه
+                    return true;
                 }
+
+                // ما زال في صيانة → خليه مفتوح
+                return false;
             });
             return;
         }
-
-        // 🔹 ممكن فيما بعد تضيفي تحقق من ForceUpdate هنا
-        // String currentVersion = "1.0.0";
-        // if (config != null && config.isForceUpdate()
-        //         && !currentVersion.equals(config.getLatestVersion())) {
-        //     // تعرضي Dialog تحديث إجباري
-        //     return;
-        // }
 
         // 🔹 تشغيل الواجهة الطبيعية
         launchNormalUi(primaryStage, config);
@@ -91,10 +97,6 @@ public class DashBoardPage extends Application {
         BorderPane.setAlignment(appTitle, Pos.TOP_LEFT);
 
 
-
-
-
-
         // ===== Top meters =====
         cpuCard = new MeterCard("CPU");
         ramCard = new MeterCard("RAM");
@@ -103,15 +105,25 @@ public class DashBoardPage extends Application {
 
         HBox mainRow = new HBox(18);
         mainRow.setAlignment(Pos.CENTER_LEFT);
-        PhysicalDiskCard topDiskCard = new PhysicalDiskCard(0, "Loading Disk...", 0);
+        // use a placeholder container so we can swap the displayed top disk easily
+        topDiskContainer = new StackPane();
+
+        // create an initial placeholder card instance so we can attach the switcher overlay immediately
+        PhysicalDiskCard placeholder = new PhysicalDiskCard(0, "Loading Disk...", 0);
+        topDiskContainer.getChildren().add(placeholder.getRoot());
+
+        // create switcher and add it into the disksRow (first item)
+       // diskSwitcher = new PhysicalDiskSwitcher(0, 0, idx -> Platform.runLater(() -> swapTopDisk(idx)));
+
+
         mainRow.getChildren().addAll(
                 cpuCard.getRoot(),
                 ramCard.getRoot(),
                 gpuCard.getRoot(),
-                topDiskCard.getRoot()
+                topDiskContainer
         );
 
-        HBox.setHgrow(topDiskCard.getRoot(), Priority.ALWAYS);
+        HBox.setHgrow(topDiskContainer, Priority.ALWAYS);
         HBox.setHgrow(cpuCard.getRoot(), Priority.ALWAYS);
         HBox.setHgrow(ramCard.getRoot(), Priority.ALWAYS);
         HBox.setHgrow(gpuCard.getRoot(), Priority.ALWAYS);
@@ -120,7 +132,8 @@ public class DashBoardPage extends Application {
         disksRow = new HBox(18);
         disksRow.setAlignment(Pos.CENTER_LEFT);
 
-
+        // put switcher inside disksRow as the first child so it stays visible inline with other disk cards
+      //  disksRow.getChildren().add(diskSwitcher.getRoot());
 
         // ===== Action cards =====
         ActionCard freeRamCard = new ActionCard(
@@ -152,14 +165,12 @@ public class DashBoardPage extends Application {
         );
 
 
-
         ActionCard modesCard = new ActionCard(
                 "Power Modes",
                 "Switch power / balanced / performance",
                 "Open",
                 "M7 2 L11 8 H8 L10 14 L5 8 H8 Z\n" // ⚡ أيقونة برق
         );
-
 
 
         ActionCard allInOneCard = new ActionCard(
@@ -177,19 +188,18 @@ public class DashBoardPage extends Application {
         allInOneCard.getButton().setOnAction(e -> runAllInOne());
 
 
-
         GridPane toolsGrid = new GridPane();
         toolsGrid.setHgap(18);
         toolsGrid.setVgap(18);
         toolsGrid.setPadding(new Insets(12, 0, 0, 0));
 
-        toolsGrid.add(freeRamCard.getRoot(),      0, 0);
+        toolsGrid.add(freeRamCard.getRoot(), 0, 0);
         toolsGrid.add(optimizeDiskCard.getRoot(), 1, 0);
-        toolsGrid.add(optimizeNetCard.getRoot(),  2, 0);
+        toolsGrid.add(optimizeNetCard.getRoot(), 2, 0);
 
-        toolsGrid.add(scanFixCard.getRoot(),      0, 1);
-        toolsGrid.add(modesCard.getRoot(),        1, 1);
-        toolsGrid.add(allInOneCard.getRoot(),     2, 1);
+        toolsGrid.add(scanFixCard.getRoot(), 0, 1);
+        toolsGrid.add(modesCard.getRoot(), 1, 1);
+        toolsGrid.add(allInOneCard.getRoot(), 2, 1);
 
         GridPane.setHgrow(freeRamCard.getRoot(), Priority.ALWAYS);
         GridPane.setVgrow(freeRamCard.getRoot(), Priority.ALWAYS);
@@ -269,9 +279,6 @@ public class DashBoardPage extends Application {
 // Add to wrapper
         actionsWrapper.getChildren().add(titleRow);
 
-        // === ADD TOP BAR ICONS ===
-        TopBarIcons topBarIcons = new TopBarIcons();
-
 
 // Add tools grid
         actionsWrapper.getChildren().add(toolsGrid);
@@ -288,9 +295,6 @@ public class DashBoardPage extends Application {
         );
 
         root.setCenter(centerBox);
-
-
-
 
 
         Scene scene = new Scene(root, 1280, 720);
@@ -334,7 +338,8 @@ public class DashBoardPage extends Application {
                     if (initialDisks != null && initialDisks.length > 0) {
                         physicalCards = new PhysicalDiskCard[initialDisks.length];
 
-                        disksRow.getChildren().clear();
+                        // keep switcher as first child, remove other disk nodes
+                       // disksRow.getChildren().setAll(diskSwitcher.getRoot());
 
                         for (int i = 0; i < initialDisks.length; i++) {
                             var snap = initialDisks[i];
@@ -343,8 +348,8 @@ public class DashBoardPage extends Application {
                             physicalCards[i] = card;
 
                             if (i == 0) {
-                                // الديسك الأول → في الصف العلوي
-                                mainRow.getChildren().set(3, card.getRoot());
+                                // الديسك الأول → put it into the top placeholder
+                                topDiskContainer.getChildren().setAll(card.getRoot());
                                 HBox.setHgrow(card.getRoot(), Priority.ALWAYS);
                             } else {
                                 // باقي الأقراص → تبقى في الأسفل
@@ -352,12 +357,17 @@ public class DashBoardPage extends Application {
                                 HBox.setHgrow(card.getRoot(), Priority.ALWAYS);
                             }
                         }
+                        // update switcher to reflect actual disk count and select first
+                      //  diskSwitcher.setCount(initialDisks.length);
+                        //diskSwitcher.setSelectedIndex(0);
 
-                } else {
-                        disksRow.getChildren().clear();
+                    } else {
+                        // no disks: keep switcher as first child, then show "no disks" message after it
+                      /*  disksRow.getChildren().setAll(diskSwitcher.getRoot());
                         Label noDisk = new Label("No physical disks detected.");
                         noDisk.setTextFill(Color.web("#9ca3af"));
                         disksRow.getChildren().add(noDisk);
+                        diskSwitcher.setCount(0);*/
                     }
 
                     m.start();
@@ -366,7 +376,8 @@ public class DashBoardPage extends Application {
             } catch (Exception ex) {
                 ex.printStackTrace();
                 Platform.runLater(() -> {
-                    disksRow.getChildren().clear();
+                    // keep switcher visible even on error
+                    disksRow.getChildren().setAll(diskSwitcher.getRoot());
                     Label err = new Label("Error initializing system monitor.");
                     err.setTextFill(Color.web("#f97373"));
                     disksRow.getChildren().add(err);
@@ -379,6 +390,15 @@ public class DashBoardPage extends Application {
                 monitor.stop();
             }
         });
+    }
+
+    // swap the active disk shown in the top placeholder
+    private void swapTopDisk(int index) {
+        if (physicalCards == null || physicalCards.length == 0) return;
+        if (index < 0 || index >= physicalCards.length) return;
+        var node = physicalCards[index].getRoot();
+        topDiskContainer.getChildren().setAll(node);
+        HBox.setHgrow(node, Priority.ALWAYS);
     }
 
     // ===== UI update =====
@@ -548,7 +568,10 @@ public class DashBoardPage extends Application {
         new Thread(() -> {
             runPowerShellSync(psScript, "[FreeRAM]");
 
-            try { Thread.sleep(1200); } catch (Exception ignored) {}
+            try {
+                Thread.sleep(1200);
+            } catch (Exception ignored) {
+            }
 
             SystemMonitorService.RamSnapshot after =
                     (monitor != null ? monitor.readRamOnce() : null);
@@ -586,7 +609,7 @@ public class DashBoardPage extends Application {
                         "ipconfig /flushdns | Out-Null;" +
                         "Write-Host 'Resetting IP stack...';" +
                         "netsh int ip reset | Out-Null;" +
-                        "Write-Host 'Resetting Winsock...';" +
+                        "Write-host 'Resetting Winsock...';" +
                         "netsh winsock reset | Out-Null;" +
                         "Write-Host 'Network optimization commands sent. Restart may be required.';";
 
@@ -658,7 +681,8 @@ public class DashBoardPage extends Application {
                 if (elapsed < minMillis) {
                     try {
                         Thread.sleep(minMillis - elapsed);
-                    } catch (InterruptedException ignored) {}
+                    } catch (InterruptedException ignored) {
+                    }
                 }
 
                 Platform.runLater(() ->
@@ -719,6 +743,7 @@ public class DashBoardPage extends Application {
     public static void main(String[] args) {
         launch(args);
     }
+
     private String shortenGpuName(String full) {
         if (full == null || full.isBlank()) return "Unknown";
 
@@ -743,12 +768,30 @@ public class DashBoardPage extends Application {
         return full.length() > 18 ? full.substring(0, 18) + "..." : full;
     }
 
+    // Defensive createTopIcon: uses SVG if valid, otherwise falls back to a unicode arrow label
     private StackPane createTopIcon(String svgContent) {
-        javafx.scene.shape.SVGPath icon = new javafx.scene.shape.SVGPath();
-        icon.setContent(svgContent);
-        icon.setFill(Color.web("#ffffff"));
+        javafx.scene.Node iconNode;
+        if (svgContent != null && !svgContent.isBlank()) {
+            try {
+                javafx.scene.shape.SVGPath icon = new javafx.scene.shape.SVGPath();
+                icon.setContent(svgContent);
+                icon.setFill(Color.web("#ffffff"));
+                iconNode = icon;
+            } catch (Exception ex) {
+                // invalid SVG: fallback
+                iconNode = new javafx.scene.control.Label("←");
+                ((javafx.scene.control.Label) iconNode).setFont(javafx.scene.text.Font.font("Segoe UI Symbol", 18));
+                ((javafx.scene.control.Label) iconNode).setTextFill(Color.web("#ffffff"));
+            }
+        } else {
+            // missing SVG: fallback to simple arrow
+            javafx.scene.control.Label lbl = new javafx.scene.control.Label("←");
+            lbl.setFont(javafx.scene.text.Font.font("Segoe UI Symbol", 18));
+            lbl.setTextFill(Color.web("#ffffff"));
+            iconNode = lbl;
+        }
 
-        StackPane circle = new StackPane(icon);
+        StackPane circle = new StackPane(iconNode);
         circle.setPrefSize(38, 38);
         circle.setStyle(
                 "-fx-background-color: rgba(255,255,255,0.18);" +
@@ -774,7 +817,4 @@ public class DashBoardPage extends Application {
 
         return circle;
     }
-
-
-
 }

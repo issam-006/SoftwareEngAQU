@@ -1,3 +1,4 @@
+// java
 package fxShield;
 
 import javafx.geometry.Insets;
@@ -9,8 +10,20 @@ import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
 import java.text.DecimalFormat;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 public class PhysicalDiskCard {
+
+    private static final Map<String, String> diskTypeCache = new ConcurrentHashMap<>();
+    private static final Pattern NVME_PATTERN = Pattern.compile("\\b(nvme|nvm|pci-?e|pci express|pcie)\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern M2_PATTERN = Pattern.compile("\\b(m\\.2|m2)\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern SSD_PATTERN = Pattern.compile("\\b(ssd|solid state|flash)\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern HDD_PATTERN = Pattern.compile("\\b(hdd|rotational|rpm)\\b", Pattern.CASE_INSENSITIVE);
+
+    // Toggle for debug prints
+    private static final boolean DEBUG = false;
 
     private VBox root;
     private Label titleLabel;
@@ -22,7 +35,6 @@ public class PhysicalDiskCard {
 
     public PhysicalDiskCard(int index, String model, double sizeGb) {
 
-        // ===== نوع الديسك (SSD / NVMe / HDD) =====
         String diskType = detectDiskType(model);
 
         titleLabel = new Label("Disk " + index + " • " + diskType);
@@ -56,7 +68,6 @@ public class PhysicalDiskCard {
                         "-fx-control-inner-background: rgba(255,255,255,0.08);"
         );
 
-        // ===== ستايل الكرت =====
         root = new VBox(14);
         root.setPadding(new Insets(22));
         root.setAlignment(Pos.CENTER);
@@ -75,6 +86,7 @@ public class PhysicalDiskCard {
         root.setPrefWidth(0);
         root.setMaxWidth(Double.MAX_VALUE);
 
+        // put titleLabel first (restore previous simpler header)
         root.getChildren().addAll(
                 titleLabel,
                 usedValueLabel,
@@ -85,29 +97,98 @@ public class PhysicalDiskCard {
         );
     }
 
+
     private String detectDiskType(String model) {
-        if (model == null) return "Disk";
+        if (model == null || model.trim().isEmpty()) return "Disk";
 
-        String m = model.toLowerCase();
+        String key = model.trim().toLowerCase();
+        String cached = diskTypeCache.get(key);
+        if (cached != null) return cached;
 
-        if (m.contains("nvme") || m.contains("nvm")) return "NVMe";
-        if (m.contains("ssd")) return "SSD";
-        if (m.contains("hdd") || m.contains("sata") || m.contains("st")) return "HDD";
+        String result = computeDiskType(key);
+        diskTypeCache.put(key, result);
+        return result;
+    }
 
+    private String computeDiskType(String m) {
+        // Debug print controlled by DEBUG
+        if (DEBUG) System.out.println("Detecting disk type for model: " + m);
+
+        // NVMe first (explicit)
+        if (NVME_PATTERN.matcher(m).find() || (M2_PATTERN.matcher(m).find() && m.contains("nvme"))) {
+            return "NVMe";
+        }
+
+        // SSD explicit hints
+        if (SSD_PATTERN.matcher(m).find() || M2_PATTERN.matcher(m).find()) {
+            return "SSD";
+        }
+
+        // Brand/series heuristics for SSDs (common SSD series keywords)
+        if (m.contains("samsung") && (m.contains("evo") || m.contains("pro") || m.contains("pm") || m.contains("qvo"))) return "SSD";
+        if (m.contains("kingston") || m.contains("crucial") || m.contains("sandisk") || m.contains("intel") || m.contains("micron")) return "SSD";
+
+        // HDD explicit hints
+        if (HDD_PATTERN.matcher(m).find()) return "HDD";
+
+        // Seagate / Western Digital: favor HDD unless SSD-specific token present
+        if (m.contains("seagate") || m.contains("western digital") || m.contains("wd")) {
+            if (SSD_PATTERN.matcher(m).find() || m.contains("ssd") || m.contains("nvme") || m.contains("m.2") || m.contains("m2")) {
+                return "SSD";
+            }
+            return "HDD";
+        }
+
+        // Avoid treating "sata" itself as HDD (SATA can be SSD)
+        // If only "sata" present and no other hints, fallback to Disk
+        if (m.contains("sata")) {
+            // explicit contains checks for common SSD tokens
+            if (m.contains("ssd") || m.contains("nvme") || M2_PATTERN.matcher(m).find()
+                    || m.contains("evo") || m.contains("pro") || m.contains("mx") || m.contains("qvo") || m.contains("ext") || m.contains("plus")) {
+                return "SSD";
+            }
+            return "Disk";
+        }
+
+        // Final fallback
         return "Disk";
     }
 
-    public VBox getRoot() { return root; }
-    public Label getUsedValueLabel() { return usedValueLabel; }
-    public Label getSpaceLabel() { return spaceLabel; }
-    public Label getActiveValueLabel() { return activeValueLabel; }
-    public ProgressBar getUsedBar() { return usedBar; }
-    public ProgressBar getActiveBar() { return activeBar; }
+    // Public setter: update the title/size without changing usage values.
+    public void setDiskInfo(int index, String model, double sizeGb) {
+        String diskType = detectDiskType(model);
+        titleLabel.setText("Disk " + index + " • " + diskType);
+        spaceLabel.setText("Size: " + new DecimalFormat("0.0").format(sizeGb) + " GB");
+    }
+
+    public VBox getRoot() {
+        return root;
+    }
+
+    public Label getUsedValueLabel() {
+        return usedValueLabel;
+    }
+
+    public Label getSpaceLabel() {
+        return spaceLabel;
+    }
+
+    public Label getActiveValueLabel() {
+        return activeValueLabel;
+    }
+
+    public ProgressBar getUsedBar() {
+        return usedBar;
+    }
+
+    public ProgressBar getActiveBar() {
+        return activeBar;
+    }
 
     public void updateDisk(SystemMonitorService.PhysicalDiskSnapshot snap,
                            DecimalFormat percentFormat,
                            DecimalFormat gbFormat) {
-
+        if (DEBUG) System.out.println("PhysicalDisk[" + snap.index + "] model: " + snap.model);
         String diskType = detectDiskType(snap.model);
         titleLabel.setText("Disk " + snap.index + " • " + diskType);
 
@@ -127,4 +208,5 @@ public class PhysicalDiskCard {
         activeValueLabel.setText("Active: " + percentFormat.format(snap.activePercent) + " %");
         activeBar.setProgress(snap.activePercent / 100.0);
     }
+
 }

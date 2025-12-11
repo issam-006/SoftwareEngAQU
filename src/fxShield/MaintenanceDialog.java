@@ -3,12 +3,14 @@ package fxShield;
 import javafx.animation.FadeTransition;
 import javafx.animation.ParallelTransition;
 import javafx.animation.ScaleTransition;
+import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
+import javafx.scene.control.ProgressIndicator;   // ⬅️ جديد
 import javafx.scene.effect.DropShadow;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -23,17 +25,22 @@ import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.util.Duration;
+import java.util.function.Supplier;
+
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class MaintenanceDialog {
 
-    public static void show(Stage owner, RemoteConfig config, Runnable onRetry) {
+    public static void show(Stage owner, RemoteConfig config, Supplier<Boolean> onRetry) {
+        final AtomicBoolean retryRunning = new AtomicBoolean(false);
+
         Stage dialog = new Stage();
         dialog.initOwner(owner);
         dialog.initModality(Modality.WINDOW_MODAL);
         dialog.initStyle(StageStyle.TRANSPARENT);
 
         StackPane root = new StackPane();
-        root.setStyle("-fx-background-color: rgba(0,0,0,0.55);");
+        root.setStyle("-fx-background-color: transparent;");
 
         VBox card = new VBox();
         card.setSpacing(18);
@@ -123,22 +130,6 @@ public class MaintenanceDialog {
         Region spacer = new Region();
         VBox.setVgrow(spacer, Priority.ALWAYS);
 
-        Button retryButton = new Button("Retry");
-        retryButton.setFont(Font.font("Segoe UI", 13));
-        retryButton.setDefaultButton(true);
-        retryButton.setStyle(
-                "-fx-background-radius: 12;" +
-                        "-fx-background-color: #4f8cff;" +
-                        "-fx-text-fill: white;" +
-                        "-fx-padding: 8 18 8 18;"
-        );
-        retryButton.setOnAction(e -> {
-            dialog.close();
-            if (onRetry != null) {
-                onRetry.run();
-            }
-        });
-
         Button closeButton = new Button("Exit");
         closeButton.setFont(Font.font("Segoe UI", 13));
         closeButton.setCancelButton(true);
@@ -151,12 +142,63 @@ public class MaintenanceDialog {
                         "-fx-text-fill: #d4d7e2;" +
                         "-fx-padding: 8 18 8 18;"
         );
-        closeButton.setOnAction(e -> {
-            dialog.close();
-            owner.close();
+        closeButton.setOnAction(e -> dialog.close());
+
+        // 🔄 سبينر تحميل لزر Retry
+        Button retryButton = new Button("Retry");
+        retryButton.setFont(Font.font("Segoe UI", 13));
+        retryButton.setDefaultButton(true);
+        retryButton.setStyle(
+                "-fx-background-radius: 12;" +
+                        "-fx-background-color: #4f8cff;" +
+                        "-fx-text-fill: white;" +
+                        "-fx-padding: 8 18 8 18;"
+        );
+
+        ProgressIndicator retrySpinner = new ProgressIndicator();
+        retrySpinner.setMaxSize(18, 18);
+        retrySpinner.setVisible(false);
+        retrySpinner.setOpacity(0);
+
+        StackPane retryContainer = new StackPane(retryButton, retrySpinner);
+        retryContainer.setAlignment(Pos.CENTER_RIGHT);
+
+        retryButton.setOnAction(e -> {
+
+            if (!retryRunning.compareAndSet(false, true)) return;
+
+            retryButton.setDisable(true);
+            retryButton.setText("Checking...");
+            retrySpinner.setVisible(true);
+
+            new Thread(() -> {
+                boolean online = false;
+
+                try {
+                    if (onRetry != null) {
+                        online = onRetry.get();   // ← أهم سطر
+                    }
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                }
+
+                boolean finalOnline = online;
+
+                Platform.runLater(() -> {
+                    retryRunning.set(false);
+
+                    retrySpinner.setVisible(false);
+                    retryButton.setDisable(false);
+                    retryButton.setText("Retry");
+
+                    if (finalOnline) {
+                        dialog.close();  // ← يسكر نافذة الصيانة
+                    }
+                });
+            }).start();
         });
 
-        HBox buttons = new HBox(closeButton, retryButton);
+        HBox buttons = new HBox(closeButton, retryContainer);
         buttons.setSpacing(10);
         buttons.setAlignment(Pos.CENTER_RIGHT);
 

@@ -1,5 +1,7 @@
 package fxShield;
 
+import javafx.animation.FadeTransition;
+import javafx.animation.ParallelTransition;
 import javafx.animation.TranslateTransition;
 import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
@@ -11,10 +13,6 @@ import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
 import javafx.scene.text.Font;
 import javafx.stage.Popup;
-import javafx.util.Duration;
-import javafx.animation.FadeTransition;
-import javafx.animation.TranslateTransition;
-import javafx.animation.ParallelTransition;
 import javafx.util.Duration;
 
 public class TopBarIcons {
@@ -49,6 +47,7 @@ public class TopBarIcons {
         countBadge.setStyle("-fx-background-color: #ff3b30; -fx-background-radius: 20;");
         countBadge.setPadding(new Insets(2, 4, 2, 4));
         countBadge.setVisible(messageCount > 0);
+        countBadge.setManaged(false); // float over the icon, do not affect layout
 
         StackPane bellContainer = new StackPane(bellButton, countBadge);
         StackPane.setAlignment(countBadge, Pos.TOP_RIGHT);
@@ -177,6 +176,9 @@ public class TopBarIcons {
 
             all.play();
         });
+
+        // ensure clear button reflects initial state
+        clearBtn.setDisable(messageCount == 0);
 
         // ================= MESSAGES LIST =================
 
