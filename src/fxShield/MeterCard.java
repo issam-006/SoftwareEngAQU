@@ -8,13 +8,18 @@ import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
+import java.text.DecimalFormat;
+
 public class MeterCard {
 
-    private VBox root;
-    private Label titleLabel;
-    private Label valueLabel;
-    private Label extraLabel;
-    private ProgressBar bar;
+    private final VBox root;
+    private final Label titleLabel;
+    private final Label valueLabel;
+    private final Label extraLabel;
+    private final ProgressBar bar;
+
+    // Formatter جاهز (اختياري)
+    private static final DecimalFormat DF = new DecimalFormat("0.0");
 
     public MeterCard(String titleText) {
 
@@ -38,8 +43,8 @@ public class MeterCard {
         bar = new ProgressBar(0);
         bar.setPrefWidth(260);
         bar.setStyle(
-                "-fx-accent: #a78bfa;" +                      // بنفسجي فاتح
-                        "-fx-control-inner-background: rgba(255,255,255,0.08);" // شفاف ناعم
+                "-fx-accent: #a78bfa;" +
+                        "-fx-control-inner-background: rgba(255,255,255,0.08);"
         );
 
         // ===== CARD CONTAINER =====
@@ -48,12 +53,12 @@ public class MeterCard {
         root.setPadding(new Insets(22));
 
         root.setStyle(
-                "-fx-background-color: rgba(17,13,34,0.55);" + // خلفية بنفسجية داكنة شفافة
+                "-fx-background-color: rgba(17,13,34,0.55);" +
                         "-fx-background-radius: 28;" +
                         "-fx-border-radius: 28;" +
                         "-fx-border-color: rgba(255,255,255,0.10);" +
                         "-fx-border-width: 1;" +
-                        "-fx-effect: dropshadow(gaussian, rgba(157,110,255,0.28), 25, 0.25, 0, 0);" // purple glow
+                        "-fx-effect: dropshadow(gaussian, rgba(157,110,255,0.28), 25, 0.25, 0, 0);"
         );
 
         root.setMinHeight(240);
@@ -61,11 +66,64 @@ public class MeterCard {
         root.setPrefWidth(0);
         root.setMaxWidth(Double.MAX_VALUE);
 
-        // ترتيب العناصر
+        // ترتيب العناصر (نفس ترتيبك)
         root.getChildren().addAll(titleLabel, valueLabel, bar, extraLabel);
     }
 
-    // ===== Getters =====
+    // =========================
+    //  Update helpers (اختياري)
+    // =========================
+
+    public void setValuePercent(double percent, String extraText) {
+        valueLabel.setText(DF.format(percent) + " %");
+        extraLabel.setText(extraText != null ? extraText : "");
+        bar.setProgress(clamp01(percent / 100.0));
+        applyColorByUsage(percent);
+    }
+
+    public void setUnavailable(String message) {
+        valueLabel.setText("N/A");
+        extraLabel.setText(message != null ? message : "Not available");
+        bar.setProgress(0);
+        applyUnavailableStyle();
+    }
+
+    // =========================
+    //  Styling helpers
+    // =========================
+
+    private void applyColorByUsage(double percent) {
+        String color;
+        if (percent < 60) {
+            color = "#a78bfa"; // بنفسجي هادئ
+        } else if (percent < 85) {
+            color = "#fb923c"; // برتقالي
+        } else {
+            color = "#f97373"; // أحمر
+        }
+
+        valueLabel.setTextFill(Color.web(color));
+        bar.setStyle(
+                "-fx-accent: " + color + ";" +
+                        "-fx-control-inner-background: rgba(255,255,255,0.08);"
+        );
+    }
+
+    private void applyUnavailableStyle() {
+        valueLabel.setTextFill(Color.web("#cbb8ff"));
+        bar.setStyle(
+                "-fx-accent: #a78bfa;" +
+                        "-fx-control-inner-background: rgba(255,255,255,0.08);"
+        );
+    }
+
+    private double clamp01(double v) {
+        if (v < 0) return 0;
+        if (v > 1) return 1;
+        return v;
+    }
+
+    // ===== Getters (كما هي) =====
     public VBox getRoot() { return root; }
     public Label getTitleLabel() { return titleLabel; }
     public Label getValueLabel() { return valueLabel; }

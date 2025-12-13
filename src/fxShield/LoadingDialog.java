@@ -5,7 +5,10 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Label;
-import javafx.scene.layout.*;
+import javafx.scene.effect.Effect;
+import javafx.scene.effect.GaussianBlur;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
@@ -14,36 +17,41 @@ import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.util.Duration;
 import javafx.scene.Node;
-import javafx.scene.effect.Effect;
-import javafx.scene.effect.GaussianBlur;
-
 
 public class LoadingDialog {
 
+    // ✅ حماية: لو أكثر من Dialog فتحوا، ما نخرب البلر
+    private static int blurOwners = 0;
+
     private final Node ownerRoot;
     private final Effect previousEffect;
+
     private final Stage stage;
-    private final Label titleLabel;
     private final Label messageLabel;
     private final Label dotsLabel;
 
     private final Timeline dotsTimeline;
 
     private int dotState = 0;
+    private boolean closing = false;
 
     private LoadingDialog(Stage owner, String title, String message) {
+
         stage = new Stage();
         stage.initOwner(owner);
         stage.initModality(Modality.APPLICATION_MODAL);
         stage.initStyle(StageStyle.TRANSPARENT);
 
         // ----- BLUR على الشاشة الخلفية -----
-        // نخزن الـ root الحالي للنافذة الأساسية
-        this.ownerRoot = owner.getScene() != null ? owner.getScene().getRoot() : null;
+        this.ownerRoot = (owner.getScene() != null) ? owner.getScene().getRoot() : null;
         this.previousEffect = (ownerRoot != null) ? ownerRoot.getEffect() : null;
 
         if (ownerRoot != null) {
-            ownerRoot.setEffect(new GaussianBlur(18)); // قوّة البلر، جرّب 12–20 حسب ما تحب
+            // ✅ لا نعمل overwrite غلط: أول Dialog بس هو اللي يحط البلر
+            if (blurOwners == 0) {
+                ownerRoot.setEffect(new GaussianBlur(18));
+            }
+            blurOwners++;
         }
 
         // ----- Root container -----
@@ -61,7 +69,7 @@ public class LoadingDialog {
         root.setClip(clip);
 
         // ----- Title & message -----
-        titleLabel = new Label(title);
+        Label titleLabel = new Label(title);
         titleLabel.setFont(Font.font("Segoe UI", 16));
         titleLabel.setTextFill(Color.web("#e5e7eb"));
         titleLabel.setStyle("-fx-font-weight: bold;");
@@ -96,21 +104,33 @@ public class LoadingDialog {
         scene.setFill(Color.TRANSPARENT);
         stage.setScene(scene);
         stage.setResizable(false);
-        stage.centerOnScreen();
 
-        // ----- Dots timeline -----
+        // ✅ يظهر فوق نافذة البرنامج وبمنتصفها (أدق من centerOnScreen)
+        if (owner != null) {
+            stage.setX(owner.getX() + (owner.getWidth() - 340) / 2.0);
+            stage.setY(owner.getY() + (owner.getHeight() - 160) / 2.0);
+        } else {
+            stage.centerOnScreen();
+        }
+
+        // ----- Dots timeline (أنعم) -----
         dotsTimeline = new Timeline(
-                new KeyFrame(Duration.millis(350), e -> advanceDots())
+                new KeyFrame(Duration.millis(260), e -> advanceDots())
         );
         dotsTimeline.setCycleCount(Animation.INDEFINITE);
+
+        // ✅ لو المستخدم سكّر النافذة بالقوة
+        stage.setOnCloseRequest(e -> close());
     }
 
     private void advanceDots() {
         dotState = (dotState + 1) % 3;
+
+        // ✅ حركة أنعم: نقطة تتحرك
         switch (dotState) {
             case 0 -> dotsLabel.setText("● ○ ○");
-            case 1 -> dotsLabel.setText("● ● ○");
-            case 2 -> dotsLabel.setText("● ● ●");
+            case 1 -> dotsLabel.setText("○ ● ○");
+            case 2 -> dotsLabel.setText("○ ○ ●");
         }
     }
 
@@ -121,10 +141,6 @@ public class LoadingDialog {
         return dlg;
     }
 
-    /**
-     * استدعِها لما تخلص العملية بنجاح.
-     * بيغير الحالة لـ "Done" ويعرض ✓ وبعدين يسكر.
-     */
     public void setDone(String doneMessage) {
         dotsTimeline.stop();
         messageLabel.setText(doneMessage);
@@ -148,14 +164,21 @@ public class LoadingDialog {
     }
 
     public void close() {
-        // fade-out لطيف
+        if (closing) return;
+        closing = true;
+
+        dotsTimeline.stop();
+
         FadeTransition fade = new FadeTransition(Duration.millis(150), stage.getScene().getRoot());
         fade.setFromValue(1);
         fade.setToValue(0);
         fade.setOnFinished(e -> {
-            // نرجّع الـ Effect القديم لو كان موجود
+            // ✅ رجّع البلر فقط لما آخر Dialog يسكر
             if (ownerRoot != null) {
-                ownerRoot.setEffect(previousEffect);
+                blurOwners = Math.max(0, blurOwners - 1);
+                if (blurOwners == 0) {
+                    ownerRoot.setEffect(previousEffect);
+                }
             }
             stage.close();
         });

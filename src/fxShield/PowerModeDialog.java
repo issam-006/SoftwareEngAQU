@@ -1,18 +1,24 @@
 package fxShield;
 
-import javafx.animation.*;
+import javafx.animation.FadeTransition;
+import javafx.animation.Interpolator;
+import javafx.animation.ParallelTransition;
+import javafx.animation.ScaleTransition;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
-import javafx.scene.layout.*;
+import javafx.scene.layout.BorderPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
+import javafx.util.Duration;
 
 import java.util.prefs.Preferences;
 
@@ -27,6 +33,46 @@ public class PowerModeDialog {
     private static final String PREF_NODE = "fxshield";
     private static final String PREF_KEY_POWER_MODE = "powerMode";
 
+    // ===== Styles (same look, no design change) =====
+    private static final String DIALOG_ROOT_STYLE =
+            "-fx-background-color: #020617;" +
+                    "-fx-background-radius: 18;" +
+                    "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.6), 24, 0.2, 0, 10);";
+
+    private static final String CANCEL_NORMAL =
+            "-fx-background-color: transparent;" +
+                    "-fx-text-fill: #9ca3af;" +
+                    "-fx-border-color: #4b5563;" +
+                    "-fx-border-width: 1.2;" +
+                    "-fx-background-radius: 999;" +
+                    "-fx-border-radius: 999;" +
+                    "-fx-padding: 4 18 4 18;" +
+                    "-fx-cursor: hand;";
+
+    private static final String CANCEL_HOVER =
+            "-fx-background-color: #1f2937;" +
+                    "-fx-text-fill: #e5e7eb;" +
+                    "-fx-border-color: #6b7280;" +
+                    "-fx-border-width: 1.2;" +
+                    "-fx-background-radius: 999;" +
+                    "-fx-border-radius: 999;" +
+                    "-fx-padding: 4 18 4 18;" +
+                    "-fx-cursor: hand;";
+
+    private static final String APPLY_NORMAL =
+            "-fx-background-color: #2563eb;" +
+                    "-fx-text-fill: white;" +
+                    "-fx-background-radius: 999;" +
+                    "-fx-padding: 4 22 4 22;" +
+                    "-fx-cursor: hand;";
+
+    private static final String APPLY_HOVER =
+            "-fx-background-color: #1d4ed8;" +
+                    "-fx-text-fill: white;" +
+                    "-fx-background-radius: 999;" +
+                    "-fx-padding: 4 22 4 22;" +
+                    "-fx-cursor: hand;";
+
     public static void show(Stage owner) {
         PowerMode currentMode = loadSavedMode();
 
@@ -37,17 +83,17 @@ public class PowerModeDialog {
 
         BorderPane root = new BorderPane();
         root.setPadding(new Insets(16, 24, 20, 24));
-        root.setStyle(
-                "-fx-background-color: #020617;" +
-                        "-fx-background-radius: 18;" +
-                        "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.6), 24, 0.2, 0, 10);"
-        );
+        root.setStyle(DIALOG_ROOT_STYLE);
 
-        Rectangle clip = new Rectangle(700, 390);
+        // ✅ Clip مربوط بالحجم الحقيقي (يحافظ على الزوايا حتى لو غيّرت الحجم)
+        Rectangle clip = new Rectangle();
         clip.setArcWidth(24);
         clip.setArcHeight(24);
+        clip.widthProperty().bind(root.widthProperty());
+        clip.heightProperty().bind(root.heightProperty());
         root.setClip(clip);
 
+        // ===== Title =====
         Label title = new Label("Power Mode Setting");
         title.setFont(Font.font("Segoe UI", 18));
         title.setTextFill(Color.web("#e5e7eb"));
@@ -59,7 +105,7 @@ public class PowerModeDialog {
 
         VBox titleBox = new VBox(4, title, sub);
 
-
+        // ===== Cards =====
         ModeCard performance = new ModeCard(
                 "Performance Mode",
                 "Boost your computer performance with higher power consumption.",
@@ -78,12 +124,15 @@ public class PowerModeDialog {
 
         ModeCard[] cards = {performance, balanced, quiet};
 
+        // set initial selection
         for (ModeCard c : cards) {
             if (c.mode == currentMode) {
                 setSelected(cards, c);
+                break;
             }
         }
 
+        // click to select
         for (ModeCard card : cards) {
             card.setOnMouseClicked(e -> setSelected(cards, card));
         }
@@ -92,46 +141,17 @@ public class PowerModeDialog {
         modesBox.setPadding(new Insets(20, 0, 10, 0));
         root.setCenter(modesBox);
 
+        // ===== Bottom buttons =====
         Button cancelBtn = new Button("Cancel");
         cancelBtn.setOnAction(e -> dialog.close());
-        cancelBtn.setStyle(
-                "-fx-background-color: transparent;" +
-                        "-fx-text-fill: #9ca3af;" +
-                        "-fx-border-color: #4b5563;" +
-                        "-fx-border-width: 1.2;" +
-                        "-fx-background-radius: 999;" +
-                        "-fx-border-radius: 999;" +
-                        "-fx-padding: 4 18 4 18;" +
-                        "-fx-cursor: hand;"
-        );
-
-        cancelBtn.setOnMouseEntered(e ->
-                cancelBtn.setStyle(
-                        "-fx-background-color: #1f2937;" +
-                                "-fx-text-fill: #e5e7eb;" +
-                                "-fx-border-color: #6b7280;" +
-                                "-fx-border-width: 1.2;" +
-                                "-fx-background-radius: 999;" +
-                                "-fx-border-radius: 999;" +
-                                "-fx-padding: 4 18 4 18;" +
-                                "-fx-cursor: hand;"
-                )
-        );
-
-        cancelBtn.setOnMouseExited(e ->
-                cancelBtn.setStyle(
-                        "-fx-background-color: transparent;" +
-                                "-fx-text-fill: #9ca3af;" +
-                                "-fx-border-color: #4b5563;" +
-                                "-fx-border-width: 1.2;" +
-                                "-fx-background-radius: 999;" +
-                                "-fx-border-radius: 999;" +
-                                "-fx-padding: 4 18 4 18;" +
-                                "-fx-cursor: hand;"
-                )
-        );
+        cancelBtn.setStyle(CANCEL_NORMAL);
+        cancelBtn.setOnMouseEntered(e -> cancelBtn.setStyle(CANCEL_HOVER));
+        cancelBtn.setOnMouseExited(e -> cancelBtn.setStyle(CANCEL_NORMAL));
 
         Button applyBtn = new Button("Apply");
+        applyBtn.setStyle(APPLY_NORMAL);
+        applyBtn.setOnMouseEntered(e -> applyBtn.setStyle(APPLY_HOVER));
+        applyBtn.setOnMouseExited(e -> applyBtn.setStyle(APPLY_NORMAL));
         applyBtn.setOnAction(e -> {
             ModeCard selected = getSelected(cards);
             if (selected != null) {
@@ -140,57 +160,30 @@ public class PowerModeDialog {
             }
             dialog.close();
         });
-        applyBtn.setStyle(
-                "-fx-background-color: #2563eb;" +
-                        "-fx-text-fill: white;" +
-                        "-fx-background-radius: 999;" +
-                        "-fx-padding: 4 22 4 22;" +
-                        "-fx-cursor: hand;"
-        );
-
-        applyBtn.setOnMouseEntered(e ->
-                applyBtn.setStyle(
-                        "-fx-background-color: #1d4ed8;" +
-                                "-fx-text-fill: white;" +
-                                "-fx-background-radius: 999;" +
-                                "-fx-padding: 4 22 4 22;" +
-                                "-fx-cursor: hand;"
-                )
-        );
-
-        applyBtn.setOnMouseExited(e ->
-                applyBtn.setStyle(
-                        "-fx-background-color: #2563eb;" +
-                                "-fx-text-fill: white;" +
-                                "-fx-background-radius: 999;" +
-                                "-fx-padding: 4 22 4 22;" +
-                                "-fx-cursor: hand;"
-                )
-        );
 
         HBox bottomButtons = new HBox(10, cancelBtn, applyBtn);
         bottomButtons.setAlignment(Pos.CENTER_RIGHT);
         bottomButtons.setPadding(new Insets(10, 0, 0, 0));
-
         root.setBottom(bottomButtons);
 
+        // Scene
         Scene scene = new Scene(root, 700, 390);
         scene.setFill(Color.TRANSPARENT);
         dialog.setScene(scene);
         dialog.centerOnScreen();
 
-        // initial state for animation
+        // animation init
         root.setOpacity(0);
         root.setScaleX(0.95);
         root.setScaleY(0.95);
 
         dialog.show();
 
-        FadeTransition fade = new FadeTransition(javafx.util.Duration.millis(220), root);
+        FadeTransition fade = new FadeTransition(Duration.millis(220), root);
         fade.setFromValue(0);
         fade.setToValue(1);
 
-        ScaleTransition scale = new ScaleTransition(javafx.util.Duration.millis(220), root);
+        ScaleTransition scale = new ScaleTransition(Duration.millis(220), root);
         scale.setFromX(0.95);
         scale.setFromY(0.95);
         scale.setToX(1);
@@ -231,6 +224,7 @@ public class PowerModeDialog {
         prefs().put(PREF_KEY_POWER_MODE, mode.name());
     }
 
+    // ===== Card =====
     private static class ModeCard extends VBox {
         private final Label radio;
         private final Label title;
@@ -241,10 +235,10 @@ public class PowerModeDialog {
         ModeCard(String titleText, String descText, PowerMode mode) {
             this.mode = mode;
 
-            this.setSpacing(8);
-            this.setPadding(new Insets(14));
-            this.setAlignment(Pos.TOP_LEFT);
-            this.setStyle(
+            setSpacing(8);
+            setPadding(new Insets(14));
+            setAlignment(Pos.TOP_LEFT);
+            setStyle(
                     "-fx-background-color: #020617;" +
                             "-fx-background-radius: 16;"
             );
@@ -266,11 +260,11 @@ public class PowerModeDialog {
             HBox header = new HBox(10, radio, title);
             header.setAlignment(Pos.CENTER_LEFT);
 
-            this.getChildren().addAll(header, desc);
+            getChildren().addAll(header, desc);
 
-            this.setOnMouseEntered(e -> {
+            setOnMouseEntered(e -> {
                 if (!selected) {
-                    this.setStyle(
+                    setStyle(
                             "-fx-background-color: #020617;" +
                                     "-fx-background-radius: 16;" +
                                     "-fx-border-color: #1f2937;" +
@@ -278,9 +272,10 @@ public class PowerModeDialog {
                     );
                 }
             });
-            this.setOnMouseExited(e -> {
+
+            setOnMouseExited(e -> {
                 if (!selected) {
-                    this.setStyle(
+                    setStyle(
                             "-fx-background-color: #020617;" +
                                     "-fx-background-radius: 16;"
                     );
@@ -289,11 +284,11 @@ public class PowerModeDialog {
         }
 
         void setSelected(boolean sel) {
-            this.selected = sel;
+            selected = sel;
             if (sel) {
                 radio.setText("●");
                 radio.setTextFill(Color.web("#3b82f6"));
-                this.setStyle(
+                setStyle(
                         "-fx-background-color: #020617;" +
                                 "-fx-background-radius: 16;" +
                                 "-fx-border-color: #3b82f6;" +
@@ -303,7 +298,7 @@ public class PowerModeDialog {
             } else {
                 radio.setText("○");
                 radio.setTextFill(Color.web("#9ca3af"));
-                this.setStyle(
+                setStyle(
                         "-fx-background-color: #020617;" +
                                 "-fx-background-radius: 16;"
                 );

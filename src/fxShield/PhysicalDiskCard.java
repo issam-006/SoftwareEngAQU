@@ -1,4 +1,3 @@
-// java
 package fxShield;
 
 import javafx.geometry.Insets;
@@ -10,6 +9,7 @@ import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
 import java.text.DecimalFormat;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
@@ -25,17 +25,23 @@ public class PhysicalDiskCard {
     // Toggle for debug prints
     private static final boolean DEBUG = false;
 
-    private VBox root;
-    private Label titleLabel;
-    private Label usedValueLabel;
-    private Label spaceLabel;
-    private Label activeValueLabel;
-    private ProgressBar usedBar;
-    private ProgressBar activeBar;
+    // Reuse formatters (avoid new DecimalFormat in multiple places)
+    private static final DecimalFormat SIZE_FORMAT = new DecimalFormat("0.0");
+
+    private final VBox root;
+    private final Label titleLabel;
+    private final Label usedValueLabel;
+    private final Label spaceLabel;
+    private final Label activeValueLabel;
+    private final ProgressBar usedBar;
+    private final ProgressBar activeBar;
+
+    // Optional: let service override type (SSD/HDD/NVMe) without changing UI
+    private String typeOverride = null;
 
     public PhysicalDiskCard(int index, String model, double sizeGb) {
 
-        String diskType = detectDiskType(model);
+        String diskType = resolveDiskType(model);
 
         titleLabel = new Label("Disk " + index + " • " + diskType);
         titleLabel.setTextFill(Color.web("#e9d8ff"));
@@ -53,7 +59,7 @@ public class PhysicalDiskCard {
                         "-fx-control-inner-background: rgba(255,255,255,0.08);"
         );
 
-        spaceLabel = new Label("Size: " + new DecimalFormat("0.0").format(sizeGb) + " GB");
+        spaceLabel = new Label("Size: " + SIZE_FORMAT.format(sizeGb) + " GB");
         spaceLabel.setTextFill(Color.web("#c5b3ff"));
         spaceLabel.setFont(Font.font("Segoe UI", 13));
 
@@ -86,7 +92,6 @@ public class PhysicalDiskCard {
         root.setPrefWidth(0);
         root.setMaxWidth(Double.MAX_VALUE);
 
-        // put titleLabel first (restore previous simpler header)
         root.getChildren().addAll(
                 titleLabel,
                 usedValueLabel,
@@ -97,11 +102,35 @@ public class PhysicalDiskCard {
         );
     }
 
+    // =========================
+    // Type resolution
+    // =========================
+
+    private String resolveDiskType(String model) {
+        // If override set, use it
+        if (typeOverride != null && !typeOverride.isBlank()) {
+            return normalizeType(typeOverride);
+        }
+        // Otherwise keep your heuristics (same as before)
+        return detectDiskType(model);
+    }
+
+    private String normalizeType(String t) {
+        String v = t.trim();
+        if (v.equalsIgnoreCase("solid state drive") || v.equalsIgnoreCase("solidstate")) return "SSD";
+        if (v.equalsIgnoreCase("hard disk drive") || v.equalsIgnoreCase("harddisk")) return "HDD";
+        return v.toUpperCase();
+    }
+
+    public void setDiskTypeOverride(String type) {
+        // Optional: if you want the service to set SSD/HDD/NVMe 정확
+        this.typeOverride = type;
+    }
 
     private String detectDiskType(String model) {
         if (model == null || model.trim().isEmpty()) return "Disk";
 
-        String key = model.trim().toLowerCase();
+        String key = model.trim().toLowerCase(Locale.ROOT);
         String cached = diskTypeCache.get(key);
         if (cached != null) return cached;
 
@@ -111,27 +140,21 @@ public class PhysicalDiskCard {
     }
 
     private String computeDiskType(String m) {
-        // Debug print controlled by DEBUG
         if (DEBUG) System.out.println("Detecting disk type for model: " + m);
 
-        // NVMe first (explicit)
         if (NVME_PATTERN.matcher(m).find() || (M2_PATTERN.matcher(m).find() && m.contains("nvme"))) {
             return "NVMe";
         }
 
-        // SSD explicit hints
         if (SSD_PATTERN.matcher(m).find() || M2_PATTERN.matcher(m).find()) {
             return "SSD";
         }
 
-        // Brand/series heuristics for SSDs (common SSD series keywords)
         if (m.contains("samsung") && (m.contains("evo") || m.contains("pro") || m.contains("pm") || m.contains("qvo"))) return "SSD";
         if (m.contains("kingston") || m.contains("crucial") || m.contains("sandisk") || m.contains("intel") || m.contains("micron")) return "SSD";
 
-        // HDD explicit hints
         if (HDD_PATTERN.matcher(m).find()) return "HDD";
 
-        // Seagate / Western Digital: favor HDD unless SSD-specific token present
         if (m.contains("seagate") || m.contains("western digital") || m.contains("wd")) {
             if (SSD_PATTERN.matcher(m).find() || m.contains("ssd") || m.contains("nvme") || m.contains("m.2") || m.contains("m2")) {
                 return "SSD";
@@ -139,10 +162,7 @@ public class PhysicalDiskCard {
             return "HDD";
         }
 
-        // Avoid treating "sata" itself as HDD (SATA can be SSD)
-        // If only "sata" present and no other hints, fallback to Disk
         if (m.contains("sata")) {
-            // explicit contains checks for common SSD tokens
             if (m.contains("ssd") || m.contains("nvme") || M2_PATTERN.matcher(m).find()
                     || m.contains("evo") || m.contains("pro") || m.contains("mx") || m.contains("qvo") || m.contains("ext") || m.contains("plus")) {
                 return "SSD";
@@ -150,15 +170,17 @@ public class PhysicalDiskCard {
             return "Disk";
         }
 
-        // Final fallback
         return "Disk";
     }
 
-    // Public setter: update the title/size without changing usage values.
+    // =========================
+    // Public API
+    // =========================
+
     public void setDiskInfo(int index, String model, double sizeGb) {
-        String diskType = detectDiskType(model);
+        String diskType = resolveDiskType(model);
         titleLabel.setText("Disk " + index + " • " + diskType);
-        spaceLabel.setText("Size: " + new DecimalFormat("0.0").format(sizeGb) + " GB");
+        spaceLabel.setText("Size: " + SIZE_FORMAT.format(sizeGb) + " GB");
     }
 
     public VBox getRoot() {
@@ -188,13 +210,31 @@ public class PhysicalDiskCard {
     public void updateDisk(SystemMonitorService.PhysicalDiskSnapshot snap,
                            DecimalFormat percentFormat,
                            DecimalFormat gbFormat) {
+
+        if (snap == null) {
+            // Safe fallback (no crash)
+            usedValueLabel.setText("Used: N/A");
+            usedBar.setProgress(0);
+            activeValueLabel.setText("Active: N/A");
+            activeBar.setProgress(0);
+            return;
+        }
+
         if (DEBUG) System.out.println("PhysicalDisk[" + snap.index + "] model: " + snap.model);
-        String diskType = detectDiskType(snap.model);
+
+        // IMPORTANT: keep your title style exactly, but allow optional override via service
+        if (snap.typeLabel != null && !snap.typeLabel.isBlank()) {
+            // If you want: service drives SSD/HDD/NVMe
+            // Comment next line if you want ONLY heuristics.
+            this.typeOverride = snap.typeLabel;
+        }
+
+        String diskType = resolveDiskType(snap.model);
         titleLabel.setText("Disk " + snap.index + " • " + diskType);
 
         if (snap.hasUsage) {
             usedValueLabel.setText("Used: " + percentFormat.format(snap.usedPercent) + " %");
-            usedBar.setProgress(snap.usedPercent / 100.0);
+            usedBar.setProgress(clamp01(snap.usedPercent / 100.0));
 
             spaceLabel.setText(
                     gbFormat.format(snap.usedGb) + " / " + gbFormat.format(snap.totalGb) + " GB"
@@ -206,7 +246,12 @@ public class PhysicalDiskCard {
         }
 
         activeValueLabel.setText("Active: " + percentFormat.format(snap.activePercent) + " %");
-        activeBar.setProgress(snap.activePercent / 100.0);
+        activeBar.setProgress(clamp01(snap.activePercent / 100.0));
     }
 
+    private double clamp01(double v) {
+        if (v < 0) return 0;
+        if (v > 1) return 1;
+        return v;
+    }
 }

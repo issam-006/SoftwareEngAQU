@@ -3,6 +3,7 @@ package fxShield;
 import javafx.animation.FadeTransition;
 import javafx.animation.ParallelTransition;
 import javafx.animation.ScaleTransition;
+import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -10,7 +11,7 @@ import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
-import javafx.scene.control.ProgressIndicator;   // ⬅️ جديد
+import javafx.scene.control.ProgressIndicator;
 import javafx.scene.effect.DropShadow;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -25,11 +26,13 @@ import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.util.Duration;
-import java.util.function.Supplier;
 
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 
 public class MaintenanceDialog {
+
+    private static final Duration ANIM = Duration.millis(220);
 
     public static void show(Stage owner, RemoteConfig config, Supplier<Boolean> onRetry) {
         final AtomicBoolean retryRunning = new AtomicBoolean(false);
@@ -61,6 +64,7 @@ public class MaintenanceDialog {
         ds.setColor(Color.rgb(0, 0, 0, 0.45));
         card.setEffect(ds);
 
+        // ===== ICON =====
         Circle iconCircle = new Circle(26);
         iconCircle.setFill(Color.web("#ffb020"));
 
@@ -71,6 +75,7 @@ public class MaintenanceDialog {
         StackPane iconStack = new StackPane(iconCircle, iconLabel);
         iconStack.setAlignment(Pos.CENTER);
 
+        // ===== TEXTS =====
         Label title = new Label("fxShield Under Maintenance");
         title.setFont(Font.font("Segoe UI", FontWeight.SEMI_BOLD, 18));
         title.setTextFill(Color.WHITE);
@@ -99,17 +104,24 @@ public class MaintenanceDialog {
         header.setSpacing(14);
         header.setAlignment(Pos.CENTER_LEFT);
 
+        // ===== DETAILS LINK =====
         Hyperlink detailsLink = new Hyperlink("More details");
         detailsLink.setFont(Font.font("Segoe UI", 12));
         detailsLink.setTextFill(Color.web("#8aa4ff"));
         detailsLink.setBorder(null);
+
         detailsLink.setOnAction(e -> {
-            if (config != null && config.getDownloadUrl() != null &&
-                    !config.getDownloadUrl().isBlank()) {
-                getHostServices(owner).showDocument(config.getDownloadUrl());
+            if (config == null) return;
+            String url = config.getDownloadUrl();
+            if (url == null || url.isBlank()) return;
+
+            var hs = safeHostServices(owner);
+            if (hs != null) {
+                hs.showDocument(url);
             }
         });
 
+        // ===== VERSION LABEL =====
         Label versionLabel = new Label();
         if (config != null && config.getLatestVersion() != null) {
             String text = "Planned version: " + config.getLatestVersion();
@@ -130,6 +142,7 @@ public class MaintenanceDialog {
         Region spacer = new Region();
         VBox.setVgrow(spacer, Priority.ALWAYS);
 
+        // ===== BUTTONS =====
         Button closeButton = new Button("Exit");
         closeButton.setFont(Font.font("Segoe UI", 13));
         closeButton.setCancelButton(true);
@@ -144,7 +157,6 @@ public class MaintenanceDialog {
         );
         closeButton.setOnAction(e -> dialog.close());
 
-        // 🔄 سبينر تحميل لزر Retry
         Button retryButton = new Button("Retry");
         retryButton.setFont(Font.font("Segoe UI", 13));
         retryButton.setDefaultButton(true);
@@ -164,38 +176,48 @@ public class MaintenanceDialog {
         retryContainer.setAlignment(Pos.CENTER_RIGHT);
 
         retryButton.setOnAction(e -> {
-
             if (!retryRunning.compareAndSet(false, true)) return;
 
             retryButton.setDisable(true);
             retryButton.setText("Checking...");
+
             retrySpinner.setVisible(true);
+            FadeTransition spinnerIn = new FadeTransition(Duration.millis(120), retrySpinner);
+            spinnerIn.setFromValue(0);
+            spinnerIn.setToValue(1);
+            spinnerIn.play();
 
             new Thread(() -> {
                 boolean online = false;
 
                 try {
                     if (onRetry != null) {
-                        online = onRetry.get();   // ← أهم سطر
+                        Boolean result = onRetry.get(); // مهم: قد تكون null
+                        online = Boolean.TRUE.equals(result);
                     }
                 } catch (Exception ex) {
                     ex.printStackTrace();
                 }
 
-                boolean finalOnline = online;
+                final boolean finalOnline = online;
 
                 Platform.runLater(() -> {
                     retryRunning.set(false);
 
-                    retrySpinner.setVisible(false);
+                    FadeTransition spinnerOut = new FadeTransition(Duration.millis(120), retrySpinner);
+                    spinnerOut.setFromValue(1);
+                    spinnerOut.setToValue(0);
+                    spinnerOut.setOnFinished(ev -> retrySpinner.setVisible(false));
+                    spinnerOut.play();
+
                     retryButton.setDisable(false);
                     retryButton.setText("Retry");
 
                     if (finalOnline) {
-                        dialog.close();  // ← يسكر نافذة الصيانة
+                        dialog.close();
                     }
                 });
-            }).start();
+            }, "MaintenanceRetry").start();
         });
 
         HBox buttons = new HBox(closeButton, retryContainer);
@@ -208,19 +230,21 @@ public class MaintenanceDialog {
         Scene scene = new Scene(root);
         scene.setFill(Color.TRANSPARENT);
         dialog.setScene(scene);
+
         dialog.setWidth(520);
         dialog.setHeight(260);
         dialog.centerOnScreen();
 
+        // ===== OPEN ANIMATION =====
         card.setScaleX(0.85);
         card.setScaleY(0.85);
         card.setOpacity(0);
 
-        FadeTransition fade = new FadeTransition(Duration.millis(220), card);
+        FadeTransition fade = new FadeTransition(ANIM, card);
         fade.setFromValue(0);
         fade.setToValue(1);
 
-        ScaleTransition scale = new ScaleTransition(Duration.millis(220), card);
+        ScaleTransition scale = new ScaleTransition(ANIM, card);
         scale.setFromX(0.85);
         scale.setFromY(0.85);
         scale.setToX(1);
@@ -228,12 +252,22 @@ public class MaintenanceDialog {
 
         ParallelTransition appear = new ParallelTransition(fade, scale);
         appear.setOnFinished(e -> card.requestFocus());
+
         dialog.show();
         appear.play();
     }
 
-    private static javafx.application.HostServices getHostServices(Stage owner) {
-        return ((javafx.application.Application)
-                owner.getProperties().get("appInstance")).getHostServices();
+    /**
+     * Safe HostServices access:
+     * - avoids ClassCastException / NullPointerException if appInstance is missing.
+     */
+    private static javafx.application.HostServices safeHostServices(Stage owner) {
+        try {
+            Object app = owner.getProperties().get("appInstance");
+            if (app instanceof Application a) {
+                return a.getHostServices();
+            }
+        } catch (Exception ignored) {}
+        return null;
     }
 }

@@ -7,7 +7,9 @@ import javafx.geometry.Bounds;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
-import javafx.scene.control.*;
+import javafx.scene.control.Button;
+import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Circle;
@@ -23,12 +25,22 @@ public class TopBarIcons {
     private final Button userButton;
     private final Button settingsButton;
 
-    private Popup notificationPopup = null;
+    private Popup notificationPopup;
+    private VBox messagesBox;
 
-    // الرسائل لعرض العدد الحمر
     private int messageCount = 5;
-    private Label countBadge;
+    private final Label countBadge;
 
+    // ===== Styles =====
+    private static final String ICON_BTN =
+            "-fx-background-color: transparent;" +
+                    "-fx-text-fill: white;" +
+                    "-fx-cursor: hand;";
+
+    private static final String ICON_BTN_HOVER =
+            "-fx-background-color: rgba(255,255,255,0.12);" +
+                    "-fx-text-fill: white;" +
+                    "-fx-background-radius: 8;";
 
     public TopBarIcons() {
 
@@ -40,14 +52,14 @@ public class TopBarIcons {
         userButton = createIconButton("👤");
         settingsButton = createIconButton("⚙");
 
-        // Badge (النقطة الحمراء)
+        // ===== Badge =====
         countBadge = new Label(String.valueOf(messageCount));
         countBadge.setFont(Font.font(10));
         countBadge.setTextFill(Color.WHITE);
         countBadge.setStyle("-fx-background-color: #ff3b30; -fx-background-radius: 20;");
-        countBadge.setPadding(new Insets(2, 4, 2, 4));
+        countBadge.setPadding(new Insets(2));
         countBadge.setVisible(messageCount > 0);
-        countBadge.setManaged(false); // float over the icon, do not affect layout
+        countBadge.setManaged(false);
 
         StackPane bellContainer = new StackPane(bellButton, countBadge);
         StackPane.setAlignment(countBadge, Pos.TOP_RIGHT);
@@ -59,17 +71,24 @@ public class TopBarIcons {
         root.getChildren().addAll(bellContainer, userButton, settingsButton);
     }
 
+    // ======================================================
+    //                  ICON BUTTON
+    // ======================================================
 
     private Button createIconButton(String icon) {
         Button btn = new Button(icon);
         btn.setFont(Font.font("Segoe UI Emoji", 20));
-        btn.setStyle(
-                "-fx-background-color: transparent; -fx-text-fill: white; -fx-cursor: hand;"
-        );
-        btn.setOnMouseEntered(e -> btn.setStyle("-fx-background-color: rgba(255,255,255,0.12); -fx-text-fill: white; -fx-background-radius: 8;"));
-        btn.setOnMouseExited(e -> btn.setStyle("-fx-background-color: transparent; -fx-text-fill: white;"));
+        btn.setStyle(ICON_BTN);
+
+        btn.setOnMouseEntered(e -> btn.setStyle(ICON_BTN_HOVER));
+        btn.setOnMouseExited(e -> btn.setStyle(ICON_BTN));
+
         return btn;
     }
+
+    // ======================================================
+    //                  POPUP
+    // ======================================================
 
     private void togglePopup(Node anchor) {
         if (notificationPopup != null && notificationPopup.isShowing()) {
@@ -79,17 +98,18 @@ public class TopBarIcons {
         showPopup(anchor);
     }
 
-
     private void showPopup(Node anchor) {
 
-        if (notificationPopup != null)
+        if (notificationPopup != null) {
             notificationPopup.hide();
+        }
 
         notificationPopup = new Popup();
 
         VBox box = new VBox(20);
         box.setPadding(new Insets(22));
         box.setPrefSize(320, 450);
+        box.setOpacity(0);
 
         box.setStyle(
                 "-fx-background-color: rgba(20,20,30,0.96);" +
@@ -99,8 +119,7 @@ public class TopBarIcons {
                         "-fx-border-radius: 22;"
         );
 
-        // ================= HEADER =================
-
+        // ===== Header =====
         HBox header = new HBox();
         Label title = new Label("Allow Notifications");
         title.setFont(Font.font("Segoe UI", 20));
@@ -111,13 +130,12 @@ public class TopBarIcons {
 
         Button closeBtn = new Button("✕");
         closeBtn.setFont(Font.font(16));
-        closeBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: white; -fx-cursor: hand;");
+        closeBtn.setStyle(ICON_BTN);
         closeBtn.setOnAction(e -> notificationPopup.hide());
 
         header.getChildren().addAll(title, spacer, closeBtn);
 
-        // ================= SWITCH =================
-
+        // ===== Switch =====
         HBox notifRow = new HBox(14);
         notifRow.setAlignment(Pos.CENTER_LEFT);
 
@@ -130,65 +148,18 @@ public class TopBarIcons {
 
         notifRow.getChildren().addAll(notifLabel, switchControl);
 
-        // ================= MESSAGES TITLE =================
-
+        // ===== Messages =====
         Label msgTitle = new Label("Messages");
         msgTitle.setFont(Font.font(17));
         msgTitle.setTextFill(Color.WHITE);
 
-        // ================= CLEAR BTN =================
-
         Button clearBtn = new Button("Clear Messages");
         clearBtn.setFont(Font.font(13));
         clearBtn.setTextFill(Color.WHITE);
-        clearBtn.setStyle(
-                "-fx-background-color: rgba(255,255,255,0.12);" +
-                        "-fx-background-radius: 20;"
-        );
-
-        clearBtn.setOnAction(e -> {
-            if (messagesBox.getChildren().isEmpty()) return;
-
-            // Animation group
-            ParallelTransition all = new ParallelTransition();
-
-            for (Node msg : messagesBox.getChildren()) {
-
-                // Fade out
-                FadeTransition fade = new FadeTransition(Duration.millis(300), msg);
-                fade.setToValue(0);
-
-                // Slide down
-                TranslateTransition slide = new TranslateTransition(Duration.millis(300), msg);
-                slide.setByY(20);
-
-                // combine animations
-                ParallelTransition pt = new ParallelTransition(fade, slide);
-                all.getChildren().add(pt);
-            }
-
-            all.setOnFinished(ev -> {
-                messagesBox.getChildren().clear();
-                messageCount = 0;
-                countBadge.setVisible(false);
-                clearBtn.setDisable(true);
-            });
-
-            all.play();
-        });
-
-        // ensure clear button reflects initial state
+        clearBtn.setStyle("-fx-background-color: rgba(255,255,255,0.12); -fx-background-radius: 20;");
         clearBtn.setDisable(messageCount == 0);
 
-        // ================= MESSAGES LIST =================
-
-        ScrollPane scrollPane = new ScrollPane();
-        scrollPane.setFitToWidth(true);
-        scrollPane.setStyle("-fx-background: transparent; -fx-background-color: transparent; -fx-border-color: transparent;");
-        scrollPane.setPrefHeight(240);
-
         messagesBox = new VBox(12);
-
         for (int i = 1; i <= messageCount; i++) {
             Label msg = new Label("• Notification message " + i);
             msg.setFont(Font.font(14));
@@ -196,34 +167,62 @@ public class TopBarIcons {
             messagesBox.getChildren().add(msg);
         }
 
-        scrollPane.setContent(messagesBox);
+        ScrollPane scrollPane = new ScrollPane(messagesBox);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setPrefHeight(240);
+        scrollPane.setStyle("-fx-background: transparent; -fx-background-color: transparent; -fx-border-color: transparent;");
+
+        clearBtn.setOnAction(e -> clearMessages(clearBtn));
 
         box.getChildren().addAll(header, notifRow, msgTitle, clearBtn, scrollPane);
-
         notificationPopup.getContent().add(box);
 
         Bounds b = anchor.localToScreen(anchor.getBoundsInLocal());
         notificationPopup.show(anchor, b.getMinX() - 330, b.getMaxY() + 8);
+
+        // Fade in
+        FadeTransition fade = new FadeTransition(Duration.millis(180), box);
+        fade.setFromValue(0);
+        fade.setToValue(1);
+        fade.play();
     }
 
+    private void clearMessages(Button clearBtn) {
+        if (messagesBox.getChildren().isEmpty()) return;
 
-    private VBox messagesBox;
+        ParallelTransition all = new ParallelTransition();
+
+        for (Node msg : messagesBox.getChildren()) {
+            FadeTransition fade = new FadeTransition(Duration.millis(300), msg);
+            fade.setToValue(0);
+
+            TranslateTransition slide = new TranslateTransition(Duration.millis(300), msg);
+            slide.setByY(20);
+
+            all.getChildren().add(new ParallelTransition(fade, slide));
+        }
+
+        all.setOnFinished(ev -> {
+            messagesBox.getChildren().clear();
+            messageCount = 0;
+            countBadge.setVisible(false);
+            clearBtn.setDisable(true);
+        });
+
+        all.play();
+    }
 
     // ======================================================
-    //                IOS SWITCH READY
+    //                 IOS SWITCH
     // ======================================================
 
     private HBox createIOSSwitch(boolean[] state) {
 
         StackPane track = new StackPane();
         track.setPrefSize(48, 26);
-        track.setStyle(
-                "-fx-background-color: #3f4860;" +
-                        "-fx-background-radius: 30;"
-        );
+        track.setStyle("-fx-background-color: #3f4860; -fx-background-radius: 30;");
 
-        Circle knob = new Circle(10);
-        knob.setFill(Color.WHITE);
+        Circle knob = new Circle(10, Color.WHITE);
         knob.setTranslateX(-12);
 
         track.getChildren().add(knob);
@@ -231,17 +230,15 @@ public class TopBarIcons {
         track.setOnMouseClicked(e -> {
             state[0] = !state[0];
 
-            double target = state[0] ? 12 : -12;
-
             TranslateTransition tt = new TranslateTransition(Duration.millis(180), knob);
-            tt.setToX(target);
+            tt.setToX(state[0] ? 12 : -12);
             tt.play();
 
-            if (state[0]) {
-                track.setStyle("-fx-background-color: #4b73ff; -fx-background-radius: 30;");
-            } else {
-                track.setStyle("-fx-background-color: #3f4860; -fx-background-radius: 30;");
-            }
+            track.setStyle(
+                    state[0]
+                            ? "-fx-background-color: #4b73ff; -fx-background-radius: 30;"
+                            : "-fx-background-color: #3f4860; -fx-background-radius: 30;"
+            );
         });
 
         return new HBox(track);

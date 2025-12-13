@@ -32,89 +32,60 @@ public class DashBoardPage extends Application {
     private SystemMonitorService monitor;
     private HBox disksRow;
 
-    // placeholder container for the "active" disk card shown in the top row
     private StackPane topDiskContainer;
-    // the disk switcher control (shows Disk 1 / N and prev/next)
     private PhysicalDiskSwitcher diskSwitcher;
 
     @Override
     public void start(Stage stage) {
         this.primaryStage = stage;
 
-        // عشان MaintenanceDialog يقدر يستخدم HostServices
         primaryStage.getProperties().put("appInstance", this);
 
         RemoteConfigService configService = new RemoteConfigService();
         RemoteConfig config = configService.fetchConfig();
 
-        // 🔹 وضع الصيانة
         if (config != null && "maintenance".equalsIgnoreCase(config.getAppStatus())) {
             MaintenanceDialog.show(primaryStage, config, () -> {
-                // Retry: إعادة المحاولة (هذا الكود يشتغل في Thread منفصل)
-
                 RemoteConfig retryConfig = configService.fetchConfig();
 
-                // خرجنا من الصيانة ؟
                 if (retryConfig != null &&
                         !"maintenance".equalsIgnoreCase(retryConfig.getAppStatus())) {
 
-                    // خرجنا من الصيانة → نزّل الواجهة العادية على FX Thread
-                    javafx.application.Platform.runLater(() -> {
-                        launchNormalUi(primaryStage, retryConfig);
-                    });
-
-                    // رجّع true → الديالوج يسكر نفسه
+                    Platform.runLater(() -> launchNormalUi(primaryStage, retryConfig));
                     return true;
                 }
-
-                // ما زال في صيانة → خليه مفتوح
                 return false;
             });
             return;
         }
 
-        // 🔹 تشغيل الواجهة الطبيعية
         launchNormalUi(primaryStage, config);
     }
 
-    /**
-     * هذه الدالة تحتوي كل كود واجهة fxShield العادي
-     */
     private void launchNormalUi(Stage stage, RemoteConfig config) {
-        // ===== root / background =====
         root = new BorderPane();
         root.setPadding(new Insets(32, 22, 12, 22));
         root.setStyle("-fx-background-color: linear-gradient(to bottom, #020617, #0f172a);");
 
-        // ===== Header + Badge =====
         Label appTitle = new Label("Fx Shield - System Monitor & Optimizer ");
         appTitle.setFont(Font.font("Segoe UI", 22));
         appTitle.setStyle("-fx-font-weight: bold;");
         appTitle.setTextFill(Color.web("#93C5FD"));
-        appTitle.setPadding(new Insets(0, 0, 20, 0)); // مسافة بسيطة فقط
+        appTitle.setPadding(new Insets(0, 0, 20, 0));
 
         root.setTop(appTitle);
         BorderPane.setAlignment(appTitle, Pos.TOP_LEFT);
 
-
-        // ===== Top meters =====
         cpuCard = new MeterCard("CPU");
         ramCard = new MeterCard("RAM");
         gpuCard = new MeterCard("GPU");
 
-
         HBox mainRow = new HBox(18);
         mainRow.setAlignment(Pos.CENTER_LEFT);
-        // use a placeholder container so we can swap the displayed top disk easily
-        topDiskContainer = new StackPane();
 
-        // create an initial placeholder card instance so we can attach the switcher overlay immediately
+        topDiskContainer = new StackPane();
         PhysicalDiskCard placeholder = new PhysicalDiskCard(0, "Loading Disk...", 0);
         topDiskContainer.getChildren().add(placeholder.getRoot());
-
-        // create switcher and add it into the disksRow (first item)
-       // diskSwitcher = new PhysicalDiskSwitcher(0, 0, idx -> Platform.runLater(() -> swapTopDisk(idx)));
-
 
         mainRow.getChildren().addAll(
                 cpuCard.getRoot(),
@@ -128,56 +99,53 @@ public class DashBoardPage extends Application {
         HBox.setHgrow(ramCard.getRoot(), Priority.ALWAYS);
         HBox.setHgrow(gpuCard.getRoot(), Priority.ALWAYS);
 
-        // ===== Disks row =====
         disksRow = new HBox(18);
         disksRow.setAlignment(Pos.CENTER_LEFT);
 
-        // put switcher inside disksRow as the first child so it stays visible inline with other disk cards
-      //  disksRow.getChildren().add(diskSwitcher.getRoot());
+        // ✅ FIX 1: فعّلنا الـ switcher صح (بدون ما نغيّر تصميمك)
+        diskSwitcher = new PhysicalDiskSwitcher(0, 0, idx -> Platform.runLater(() -> swapTopDisk(idx)));
+        disksRow.getChildren().add(diskSwitcher.getRoot());
 
-        // ===== Action cards =====
         ActionCard freeRamCard = new ActionCard(
                 "Free RAM",
                 "Clean memory and free resources",
                 "Run",
-                "M10 2 L14 2 L8 14 L4 14 Z" // broom icon
+                "M10 2 L14 2 L8 14 L4 14 Z"
         );
 
         ActionCard optimizeDiskCard = new ActionCard(
                 "Optimize Disk",
                 "Clean & minimize disk usage",
                 "Optimize",
-                "M3 5 H13 V11 H3 Z M6 8 A1 1 0 1 0 6 8.01\n" // disk icon
+                "M3 5 H13 V11 H3 Z M6 8 A1 1 0 1 0 6 8.01\n"
         );
 
         ActionCard optimizeNetCard = new ActionCard(
                 "Optimize Network",
                 "Flush DNS & reset tweaks",
                 "Optimize",
-                "M8 2 L10 6 L8 14 L6 6 Z M7 6 H9\n" // rocket
+                "M8 2 L10 6 L8 14 L6 6 Z M7 6 H9\n"
         );
 
         ActionCard scanFixCard = new ActionCard(
                 "Scan & Fix Files",
                 "Scan system and fix corrupted files",
                 "Scan",
-                "M4 4 H14 V14 H4 Z M7 7 L11 11 M11 7 L7 11" // 🔍 أيقونة بحث + X
+                "M4 4 H14 V14 H4 Z M7 7 L11 11 M11 7 L7 11"
         );
-
 
         ActionCard modesCard = new ActionCard(
                 "Power Modes",
                 "Switch power / balanced / performance",
                 "Open",
-                "M7 2 L11 8 H8 L10 14 L5 8 H8 Z\n" // ⚡ أيقونة برق
+                "M7 2 L11 8 H8 L10 14 L5 8 H8 Z\n"
         );
-
 
         ActionCard allInOneCard = new ActionCard(
                 "One Click",
                 "Run full optimization package",
                 "Boost",
-                "M3 6 L8 2 L13 6 L13 14 H3 Z" // 🛡 أيقونة درع
+                "M3 6 L8 2 L13 6 L13 14 H3 Z"
         );
 
         freeRamCard.getButton().setOnAction(e -> runFreeRam());
@@ -186,7 +154,6 @@ public class DashBoardPage extends Application {
         scanFixCard.getButton().setOnAction(e -> runScanAndFix());
         modesCard.getButton().setOnAction(e -> runModes());
         allInOneCard.getButton().setOnAction(e -> runAllInOne());
-
 
         GridPane toolsGrid = new GridPane();
         toolsGrid.setHgap(18);
@@ -202,10 +169,8 @@ public class DashBoardPage extends Application {
         toolsGrid.add(allInOneCard.getRoot(), 2, 1);
 
         GridPane.setHgrow(freeRamCard.getRoot(), Priority.ALWAYS);
-        GridPane.setVgrow(freeRamCard.getRoot(), Priority.ALWAYS);
         GridPane.setHgrow(optimizeDiskCard.getRoot(), Priority.ALWAYS);
         GridPane.setHgrow(optimizeNetCard.getRoot(), Priority.ALWAYS);
-
         GridPane.setHgrow(scanFixCard.getRoot(), Priority.ALWAYS);
         GridPane.setHgrow(modesCard.getRoot(), Priority.ALWAYS);
         GridPane.setHgrow(allInOneCard.getRoot(), Priority.ALWAYS);
@@ -217,7 +182,6 @@ public class DashBoardPage extends Application {
         GridPane.setVgrow(modesCard.getRoot(), Priority.ALWAYS);
         GridPane.setVgrow(allInOneCard.getRoot(), Priority.ALWAYS);
 
-
         for (int i = 0; i < 3; i++) {
             ColumnConstraints col = new ColumnConstraints();
             col.setHgrow(Priority.ALWAYS);
@@ -225,48 +189,33 @@ public class DashBoardPage extends Application {
             toolsGrid.getColumnConstraints().add(col);
         }
 
-        // --- Purple background only for toolsGrid ---
-        VBox actionsWrapper = new VBox(28);      // مسافة أكبر بين العناصر
+        VBox actionsWrapper = new VBox(28);
         actionsWrapper.setPadding(new Insets(28, 32, 40, 32));
-// ↑  أكبر من فوق — أكبر من الجوانب — أكبر من تحت
-
-// 10 top - 26 right - 40 bottom - 26 left
-
         actionsWrapper.setStyle(
-                "-fx-background-color: rgba(147,197,253,0.18);" +      /* Glass light blue */
+                "-fx-background-color: rgba(147,197,253,0.18);" +
                         "-fx-background-radius: 26;" +
                         "-fx-border-color: rgba(255,255,255,0.25);" +
                         "-fx-border-radius: 26;" +
                         "-fx-border-width: 1;" +
-
-                        /* Outer Glow قوي */
                         "-fx-effect: dropshadow(gaussian, rgba(147,197,253,0.80), 1, 0.7, 0, 0)," +
-
-                        /* Inner Glow */
                         " dropshadow(gaussian, rgba(147,197,253,0.35), 20, 0.4, 0, 0)," +
-
-                        /* Soft blur glow */
                         " dropshadow(gaussian, rgba(147,197,253,0.55), 35, 0.5, 0, 0);"
         );
 
-
         actionsWrapper.setBorder(new Border(new BorderStroke(
-                Color.rgb(147, 197, 253, 0.25),   // Light blue border
+                Color.rgb(147, 197, 253, 0.25),
                 BorderStrokeStyle.SOLID,
                 new CornerRadii(22),
                 new BorderWidths(1.4)
         )));
 
-        // Title
         Label actionsTitle = new Label("Quick Optimization Tools");
         actionsTitle.setFont(Font.font("Segoe UI", 22));
         actionsTitle.setTextFill(Color.web("#000000"));
         actionsTitle.setStyle("-fx-font-weight: bold;");
 
-// Icons bar
         TopBarIcons topIcons = new TopBarIcons();
 
-// Title + Icons row
         HBox titleRow = new HBox();
         titleRow.setAlignment(Pos.CENTER_LEFT);
         titleRow.setPadding(new Insets(0, 0, 10, 0));
@@ -275,27 +224,14 @@ public class DashBoardPage extends Application {
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
         titleRow.getChildren().addAll(actionsTitle, spacer, topIcons.getRoot());
-
-// Add to wrapper
         actionsWrapper.getChildren().add(titleRow);
-
-
-// Add tools grid
         actionsWrapper.getChildren().add(toolsGrid);
 
-
-// Center layout (no background here)
         VBox centerBox = new VBox(28);
         centerBox.setFillWidth(true);
-
-        centerBox.getChildren().addAll(
-                mainRow,
-                disksRow,
-                actionsWrapper
-        );
+        centerBox.getChildren().addAll(mainRow, disksRow, actionsWrapper);
 
         root.setCenter(centerBox);
-
 
         Scene scene = new Scene(root, 1280, 720);
         stage.setTitle("FX Shield - System Monitor & Optimizer");
@@ -303,9 +239,6 @@ public class DashBoardPage extends Application {
         stage.setMaximized(true);
         stage.show();
 
-        // ======================
-        //   SystemMonitorService في Thread منفصل
-        // ======================
         new Thread(() -> {
             try {
                 SystemMonitorService m = new SystemMonitorService();
@@ -318,7 +251,9 @@ public class DashBoardPage extends Application {
                         updateCpuUI(cpuPercent);
                         updateRamUI(ramSnap);
                         updateGpuUI(gpuUsage);
-                        if (diskSnaps != null && physicalCards != null) {
+
+                        // ✅ FIX 2: لا تعمل تحديث ديسكات إلا إذا الـ array جاهز وبطول مناسب
+                        if (diskSnaps != null && physicalCards != null && physicalCards.length > 0) {
                             updatePhysicalDisksUI(diskSnaps);
                         }
                     });
@@ -327,47 +262,42 @@ public class DashBoardPage extends Application {
                 Platform.runLater(() -> {
                     this.monitor = m;
 
-                    // GPU title
                     if (gpuName == null || gpuName.isBlank()) {
                         gpuCard.getTitleLabel().setText("GPU - Unknown");
                     } else {
                         gpuCard.getTitleLabel().setText("GPU - " + shortenGpuName(gpuName));
                     }
 
-                    // 🔹 نستبدل الكرت الوهمي بالكروت الحقيقية
                     if (initialDisks != null && initialDisks.length > 0) {
                         physicalCards = new PhysicalDiskCard[initialDisks.length];
 
-                        // keep switcher as first child, remove other disk nodes
-                       // disksRow.getChildren().setAll(diskSwitcher.getRoot());
+                        // ✅ خلي الـ switcher دايمًا أول عنصر (ما بنحذف تصميمك)
+                        disksRow.getChildren().setAll(diskSwitcher.getRoot());
 
                         for (int i = 0; i < initialDisks.length; i++) {
-                            var snap = initialDisks[i];
+                            SystemMonitorService.PhysicalDiskSnapshot snap = initialDisks[i];
 
                             PhysicalDiskCard card = new PhysicalDiskCard(i, snap.model, snap.sizeGb);
                             physicalCards[i] = card;
 
                             if (i == 0) {
-                                // الديسك الأول → put it into the top placeholder
                                 topDiskContainer.getChildren().setAll(card.getRoot());
                                 HBox.setHgrow(card.getRoot(), Priority.ALWAYS);
                             } else {
-                                // باقي الأقراص → تبقى في الأسفل
                                 disksRow.getChildren().add(card.getRoot());
                                 HBox.setHgrow(card.getRoot(), Priority.ALWAYS);
                             }
                         }
-                        // update switcher to reflect actual disk count and select first
-                      //  diskSwitcher.setCount(initialDisks.length);
-                        //diskSwitcher.setSelectedIndex(0);
+
+                        diskSwitcher.setCount(initialDisks.length);
+                        diskSwitcher.setSelectedIndex(0);
 
                     } else {
-                        // no disks: keep switcher as first child, then show "no disks" message after it
-                      /*  disksRow.getChildren().setAll(diskSwitcher.getRoot());
+                        physicalCards = new PhysicalDiskCard[0];
+                        diskSwitcher.setCount(0);
                         Label noDisk = new Label("No physical disks detected.");
                         noDisk.setTextFill(Color.web("#9ca3af"));
                         disksRow.getChildren().add(noDisk);
-                        diskSwitcher.setCount(0);*/
                     }
 
                     m.start();
@@ -376,7 +306,7 @@ public class DashBoardPage extends Application {
             } catch (Exception ex) {
                 ex.printStackTrace();
                 Platform.runLater(() -> {
-                    // keep switcher visible even on error
+                    // ✅ FIX 3: لا تستخدم diskSwitcher إذا فشل قبل إنشائه (بس هو هسا مضمون)
                     disksRow.getChildren().setAll(diskSwitcher.getRoot());
                     Label err = new Label("Error initializing system monitor.");
                     err.setTextFill(Color.web("#f97373"));
@@ -386,22 +316,18 @@ public class DashBoardPage extends Application {
         }).start();
 
         stage.setOnCloseRequest(e -> {
-            if (monitor != null) {
-                monitor.stop();
-            }
+            if (monitor != null) monitor.stop();
         });
     }
 
-    // swap the active disk shown in the top placeholder
     private void swapTopDisk(int index) {
         if (physicalCards == null || physicalCards.length == 0) return;
         if (index < 0 || index >= physicalCards.length) return;
-        var node = physicalCards[index].getRoot();
+
+        Region node = physicalCards[index].getRoot();
         topDiskContainer.getChildren().setAll(node);
         HBox.setHgrow(node, Priority.ALWAYS);
     }
-
-    // ===== UI update =====
 
     private void updateCpuUI(double percent) {
         if (percent < 0) {
@@ -411,31 +337,30 @@ public class DashBoardPage extends Application {
             styleAsUnavailable(cpuCard);
             return;
         }
-        String text = percentFormat.format(percent) + " %";
-        cpuCard.getValueLabel().setText(text);
+        cpuCard.getValueLabel().setText(percentFormat.format(percent) + " %");
         cpuCard.getExtraLabel().setText("System CPU usage");
         cpuCard.getBar().setProgress(clamp01(percent / 100.0));
         styleByUsage(cpuCard, percent);
     }
 
     private void updateRamUI(SystemMonitorService.RamSnapshot snap) {
-        double percent = snap.percent;
-        String percentText = percentFormat.format(percent) + " %";
-        String extra = gbFormat.format(snap.usedGb) + " / " +
-                gbFormat.format(snap.totalGb) + " GB";
+        if (snap == null) return;
 
-        ramCard.getValueLabel().setText(percentText);
-        ramCard.getExtraLabel().setText(extra);
+        double percent = snap.percent;
+        ramCard.getValueLabel().setText(percentFormat.format(percent) + " %");
+        ramCard.getExtraLabel().setText(
+                gbFormat.format(snap.usedGb) + " / " + gbFormat.format(snap.totalGb) + " GB"
+        );
         ramCard.getBar().setProgress(clamp01(percent / 100.0));
         styleByUsage(ramCard, percent);
     }
 
     private void updateGpuUI(int usage) {
         double percent = usage;
-        String percentText = percentFormat.format(percent) + " %";
-        gpuCard.getValueLabel().setText(percentText);
+        gpuCard.getValueLabel().setText(percentFormat.format(percent) + " %");
 
-        if (!monitor.isGpuUsageSupported()) {
+        // ✅ FIX: monitor ممكن يكون null أول ثواني
+        if (monitor == null || !monitor.isGpuUsageSupported()) {
             gpuCard.getExtraLabel().setText("GPU usage not supported on this system");
         } else {
             gpuCard.getExtraLabel().setText("GPU utilization");
@@ -445,21 +370,23 @@ public class DashBoardPage extends Application {
         styleByUsage(gpuCard, percent);
     }
 
-
     private void updatePhysicalDisksUI(SystemMonitorService.PhysicalDiskSnapshot[] snaps) {
-        for (int i = 0; i < snaps.length; i++) {
+        if (snaps == null || physicalCards == null) return;
+
+        int len = Math.min(snaps.length, physicalCards.length);
+
+        for (int i = 0; i < len; i++) {
             SystemMonitorService.PhysicalDiskSnapshot snap = snaps[i];
             PhysicalDiskCard card = physicalCards[i];
-            if (card == null) continue;
+            if (card == null || snap == null) continue;
 
             if (snap.hasUsage) {
                 double usedPercent = snap.usedPercent;
-                String usedText = "Used: " + percentFormat.format(usedPercent) + " %";
-                String spaceText = gbFormat.format(snap.usedGb) + " / " +
-                        gbFormat.format(snap.totalGb) + " GB";
 
-                card.getUsedValueLabel().setText(usedText);
-                card.getSpaceLabel().setText(spaceText);
+                card.getUsedValueLabel().setText("Used: " + percentFormat.format(usedPercent) + " %");
+                card.getSpaceLabel().setText(
+                        gbFormat.format(snap.usedGb) + " / " + gbFormat.format(snap.totalGb) + " GB"
+                );
                 card.getUsedBar().setProgress(clamp01(usedPercent / 100.0));
                 styleByUsage(card, usedPercent, true);
             } else {
@@ -470,43 +397,32 @@ public class DashBoardPage extends Application {
             }
 
             double activePercent = snap.activePercent;
-            String activeText = "Active: " + percentFormat.format(activePercent) + " %";
-            card.getActiveValueLabel().setText(activeText);
+            card.getActiveValueLabel().setText("Active: " + percentFormat.format(activePercent) + " %");
             card.getActiveBar().setProgress(clamp01(activePercent / 100.0));
             styleByUsage(card, activePercent, false);
         }
     }
 
-    // ===== Styling helpers =====
-
     private void styleByUsage(MeterCard card, double percent) {
         String color = usageColor(percent);
         card.getValueLabel().setTextFill(Color.web(color));
-        String barStyle = "-fx-accent: " + color + ";" +
-                "-fx-control-inner-background: #020617;";
-        card.getBar().setStyle(barStyle);
+        card.getBar().setStyle("-fx-accent: " + color + ";" + "-fx-control-inner-background: #020617;");
     }
 
     private void styleAsUnavailable(MeterCard card) {
         String color = "#9ca3af";
         card.getValueLabel().setTextFill(Color.web(color));
-        String barStyle = "-fx-accent: " + color + ";" +
-                "-fx-control-inner-background: #020617;";
-        card.getBar().setStyle(barStyle);
+        card.getBar().setStyle("-fx-accent: " + color + ";" + "-fx-control-inner-background: #020617;");
     }
 
     private void styleByUsage(PhysicalDiskCard card, double percent, boolean forUsedBar) {
         String color = usageColor(percent);
         if (forUsedBar) {
             card.getUsedValueLabel().setTextFill(Color.web(color));
-            String barStyle = "-fx-accent: " + color + ";" +
-                    "-fx-control-inner-background: #020617;";
-            card.getUsedBar().setStyle(barStyle);
+            card.getUsedBar().setStyle("-fx-accent: " + color + ";" + "-fx-control-inner-background: #020617;");
         } else {
             card.getActiveValueLabel().setTextFill(Color.web(color));
-            String barStyle = "-fx-accent: " + color + ";" +
-                    "-fx-control-inner-background: #020617;";
-            card.getActiveBar().setStyle(barStyle);
+            card.getActiveBar().setStyle("-fx-accent: " + color + ";" + "-fx-control-inner-background: #020617;");
         }
     }
 
@@ -514,25 +430,17 @@ public class DashBoardPage extends Application {
         String color = "#9ca3af";
         if (forUsedBar) {
             card.getUsedValueLabel().setTextFill(Color.web(color));
-            String barStyle = "-fx-accent: " + color + ";" +
-                    "-fx-control-inner-background: #020617;";
-            card.getUsedBar().setStyle(barStyle);
+            card.getUsedBar().setStyle("-fx-accent: " + color + ";" + "-fx-control-inner-background: #020617;");
         } else {
             card.getActiveValueLabel().setTextFill(Color.web(color));
-            String barStyle = "-fx-accent: " + color + ";" +
-                    "-fx-control-inner-background: #020617;";
-            card.getActiveBar().setStyle(barStyle);
+            card.getActiveBar().setStyle("-fx-accent: " + color + ";" + "-fx-control-inner-background: #020617;");
         }
     }
 
     private String usageColor(double percent) {
-        if (percent < 60.0) {
-            return "#60a5fa";
-        } else if (percent < 85.0) {
-            return "#fb923c";
-        } else {
-            return "#f97373";
-        }
+        if (percent < 60.0) return "#60a5fa";
+        if (percent < 85.0) return "#fb923c";
+        return "#f97373";
     }
 
     private double clamp01(double v) {
@@ -541,40 +449,29 @@ public class DashBoardPage extends Application {
         return v;
     }
 
-    // ===== Actions =====
-
     private void runFreeRam() {
         System.out.println("[ACTION] Free RAM clicked");
 
-        // قبل التنظيف: snapshot RAM
-        SystemMonitorService.RamSnapshot before =
-                (monitor != null ? monitor.readRamOnce() : null);
+        SystemMonitorService.RamSnapshot before = (monitor != null ? monitor.readRamOnce() : null);
 
-        // نعرض لودنغ نفس Optimize Network
         LoadingDialog dialog = LoadingDialog.show(
                 primaryStage,
                 "Cleaning RAM",
                 "Cleaning junk files & freeing memory..."
         );
 
-        // سكربت PowerShell الحقيقي
         String psScript =
                 "$ErrorActionPreference='SilentlyContinue';" +
                         "Remove-Item -Path $env:TEMP\\* -Recurse -Force -ErrorAction SilentlyContinue;" +
                         "Remove-Item -Path $env:WINDIR\\Prefetch\\* -Recurse -Force -ErrorAction SilentlyContinue;" +
                         "Remove-Item -Path $env:APPDATA\\Microsoft\\Windows\\Recent\\* -Recurse -Force -ErrorAction SilentlyContinue;";
 
-        // ننفّذ على Thread منفصل
         new Thread(() -> {
             runPowerShellSync(psScript, "[FreeRAM]");
 
-            try {
-                Thread.sleep(1200);
-            } catch (Exception ignored) {
-            }
+            try { Thread.sleep(1200); } catch (Exception ignored) {}
 
-            SystemMonitorService.RamSnapshot after =
-                    (monitor != null ? monitor.readRamOnce() : null);
+            SystemMonitorService.RamSnapshot after = (monitor != null ? monitor.readRamOnce() : null);
 
             Platform.runLater(() -> {
                 if (before == null || after == null) {
@@ -591,10 +488,8 @@ public class DashBoardPage extends Application {
 
                 dialog.setDone(msg);
             });
-
         }).start();
     }
-
 
     private void runOptimizeDisk() {
         System.out.println("[ACTION] Optimize Disk clicked");
@@ -621,10 +516,6 @@ public class DashBoardPage extends Application {
         );
     }
 
-    private void runOptimizeUi() {
-        System.out.println("[ACTION] Optimize UI clicked");
-    }
-
     private void runScanAndFix() {
         System.out.println("[ACTION] Scan & Fix Files clicked");
     }
@@ -639,15 +530,9 @@ public class DashBoardPage extends Application {
         runFreeRam();
         runOptimizeDisk();
         runOptimizeNetwork();
-        runOptimizeUi();
     }
 
-    private void runPowerShellWithDialog(
-            String dialogTitle,
-            String dialogMessage,
-            String psScript,
-            String logTag
-    ) {
+    private void runPowerShellWithDialog(String dialogTitle, String dialogMessage, String psScript, String logTag) {
         int minLoadingSeconds = 10;
 
         LoadingDialog dialog = LoadingDialog.show(primaryStage, dialogTitle, dialogMessage);
@@ -656,16 +541,11 @@ public class DashBoardPage extends Application {
             long startTime = System.currentTimeMillis();
 
             try {
-                ProcessBuilder pb = new ProcessBuilder(
-                        "powershell",
-                        "-Command",
-                        psScript
-                );
+                ProcessBuilder pb = new ProcessBuilder("powershell", "-Command", psScript);
                 pb.redirectErrorStream(true);
                 Process p = pb.start();
 
-                try (BufferedReader r =
-                             new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
                     String line;
                     while ((line = r.readLine()) != null) {
                         System.out.println(logTag + " " + line);
@@ -674,42 +554,29 @@ public class DashBoardPage extends Application {
 
                 p.waitFor();
 
-                long endTime = System.currentTimeMillis();
-                long elapsed = endTime - startTime;
+                long elapsed = System.currentTimeMillis() - startTime;
                 long minMillis = minLoadingSeconds * 1000L;
 
                 if (elapsed < minMillis) {
-                    try {
-                        Thread.sleep(minMillis - elapsed);
-                    } catch (InterruptedException ignored) {
-                    }
+                    try { Thread.sleep(minMillis - elapsed); } catch (InterruptedException ignored) {}
                 }
 
-                Platform.runLater(() ->
-                        dialog.setDone("Completed successfully")
-                );
+                Platform.runLater(() -> dialog.setDone("Completed successfully"));
 
             } catch (Exception ex) {
                 ex.printStackTrace();
-                Platform.runLater(() ->
-                        dialog.setFailed("An error occurred while running the command.")
-                );
+                Platform.runLater(() -> dialog.setFailed("An error occurred while running the command."));
             }
         }).start();
     }
 
     private void runPowerShellSync(String psScript, String tag) {
         try {
-            ProcessBuilder pb = new ProcessBuilder(
-                    "powershell",
-                    "-Command",
-                    psScript
-            );
+            ProcessBuilder pb = new ProcessBuilder("powershell", "-Command", psScript);
             pb.redirectErrorStream(true);
             Process p = pb.start();
 
-            try (BufferedReader r =
-                         new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
                 String line;
                 while ((line = r.readLine()) != null) {
                     System.out.println(tag + " " + line);
@@ -721,100 +588,22 @@ public class DashBoardPage extends Application {
         }
     }
 
-    private void showActionResult(String title, String message) {
-        javafx.scene.control.Alert alert =
-                new javafx.scene.control.Alert(javafx.scene.control.Alert.AlertType.INFORMATION);
-        alert.setTitle(title);
-        alert.setHeaderText(null);
-        alert.setContentText(message);
-
-        javafx.stage.Stage s = (javafx.stage.Stage) alert.getDialogPane().getScene().getWindow();
-        alert.getDialogPane().setStyle(
-                "-fx-background-color: #020617;" +
-                        "-fx-text-fill: #e5e7eb;"
-        );
-        alert.getDialogPane().lookup(".content.label")
-                .setStyle("-fx-text-fill: #e5e7eb; -fx-font-family: 'Segoe UI';");
-
-        s.getScene().setFill(Color.TRANSPARENT);
-        alert.show();
-    }
-
     public static void main(String[] args) {
         launch(args);
     }
 
     private String shortenGpuName(String full) {
         if (full == null || full.isBlank()) return "Unknown";
-
         String f = full.toLowerCase();
 
-        // Intel internal GPUs
         if (f.contains("iris")) return "Iris Xe";
         if (f.contains("uhd")) return "UHD Graphics";
         if (f.contains("xe")) return "Intel Xe";
-
-        // AMD internal GPUs
         if (f.contains("vega")) return "Radeon Vega";
-
-        // NVIDIA
         if (f.contains("rtx")) return "RTX";
         if (f.contains("gtx")) return "GTX";
-
-        // AMD desktop cards
         if (f.contains("radeon")) return "Radeon";
 
-        // Default
         return full.length() > 18 ? full.substring(0, 18) + "..." : full;
-    }
-
-    // Defensive createTopIcon: uses SVG if valid, otherwise falls back to a unicode arrow label
-    private StackPane createTopIcon(String svgContent) {
-        javafx.scene.Node iconNode;
-        if (svgContent != null && !svgContent.isBlank()) {
-            try {
-                javafx.scene.shape.SVGPath icon = new javafx.scene.shape.SVGPath();
-                icon.setContent(svgContent);
-                icon.setFill(Color.web("#ffffff"));
-                iconNode = icon;
-            } catch (Exception ex) {
-                // invalid SVG: fallback
-                iconNode = new javafx.scene.control.Label("←");
-                ((javafx.scene.control.Label) iconNode).setFont(javafx.scene.text.Font.font("Segoe UI Symbol", 18));
-                ((javafx.scene.control.Label) iconNode).setTextFill(Color.web("#ffffff"));
-            }
-        } else {
-            // missing SVG: fallback to simple arrow
-            javafx.scene.control.Label lbl = new javafx.scene.control.Label("←");
-            lbl.setFont(javafx.scene.text.Font.font("Segoe UI Symbol", 18));
-            lbl.setTextFill(Color.web("#ffffff"));
-            iconNode = lbl;
-        }
-
-        StackPane circle = new StackPane(iconNode);
-        circle.setPrefSize(38, 38);
-        circle.setStyle(
-                "-fx-background-color: rgba(255,255,255,0.18);" +
-                        "-fx-background-radius: 50%;" +
-                        "-fx-cursor: hand;"
-        );
-        circle.setAlignment(Pos.CENTER);
-
-        circle.setOnMouseEntered(e ->
-                circle.setStyle(
-                        "-fx-background-color: rgba(255,255,255,0.32);" +
-                                "-fx-background-radius: 50%;" +
-                                "-fx-cursor: hand;"
-                )
-        );
-        circle.setOnMouseExited(e ->
-                circle.setStyle(
-                        "-fx-background-color: rgba(255,255,255,0.18);" +
-                                "-fx-background-radius: 50%;" +
-                                "-fx-cursor: hand;"
-                )
-        );
-
-        return circle;
     }
 }
