@@ -1,7 +1,7 @@
 <component name="libraryTable">
-  <library name="jna-5.13.0">
+  <library name="oshi-core-java11-6.9.1">
     <CLASSES>
-      <root url="jar://$PROJECT_DIR$/libs/jna-5.13.0.jar!/" />
+      <root url="jar://$PROJECT_DIR$/libs/oshi-core-java11-6.9.1.jar!/" />
     </CLASSES>
     <JAVADOC />
     <SOURCES />

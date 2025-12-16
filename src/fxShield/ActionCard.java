@@ -1,6 +1,8 @@
 package fxShield;
 
 import javafx.animation.TranslateTransition;
+import javafx.event.ActionEvent;
+import javafx.event.EventHandler;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
@@ -13,15 +15,11 @@ import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
 import javafx.util.Duration;
 
-public class ActionCard {
+public final class ActionCard {
 
-    private final HBox root;
-    private final Label titleLabel;
-    private final Label descLabel;
-    private final Button actionButton;
-    private final SVGPath iconShape;
+    private static final Duration HOVER_DURATION = Duration.millis(140);
 
-    // ====== Styles (same as your current UI) ======
+    // Button styles
     private static final String BTN_NORMAL =
             "-fx-background-color: rgba(129, 71, 219, 0.45);" +
                     "-fx-text-fill: white;" +
@@ -40,39 +38,48 @@ public class ActionCard {
                     "-fx-cursor: hand;" +
                     "-fx-effect: none;";
 
-    private static final String CARD_NORMAL =
+    // Card styles
+    private static final String CARD_BASE =
             "-fx-background-color: rgba(7,7,20,0.65);" +
                     "-fx-background-radius: 22;" +
                     "-fx-border-radius: 22;" +
+                    "-fx-border-width: 1;";
+
+    private static final String CARD_NORMAL =
+            CARD_BASE +
                     "-fx-border-color: rgba(255,255,255,0.10);" +
-                    "-fx-border-width: 1;" +
                     "-fx-effect: dropshadow(gaussian, rgba(140,65,255,0.15), 10, 0.2, 0, 0);";
 
-    // hover بسيط جداً بدون تغيير شكل التصميم
     private static final String CARD_HOVER =
-            "-fx-background-color: rgba(7,7,20,0.65);" +
-                    "-fx-background-radius: 22;" +
-                    "-fx-border-radius: 22;" +
+            CARD_BASE +
                     "-fx-border-color: rgba(255,255,255,0.16);" +
-                    "-fx-border-width: 1;" +
                     "-fx-effect: dropshadow(gaussian, rgba(140,65,255,0.22), 14, 0.25, 0, 0);";
 
-    public ActionCard(String title, String desc, String buttonText, String svgPath) {
+    private final HBox root;
+    private final Label titleLabel;
+    private final Label descLabel;
+    private final Button actionButton;
+    private final SVGPath iconShape;
 
-        // ===== ICON =====
+    public ActionCard(String title, String desc, String buttonText, String svgPath) {
+        this(title, desc, buttonText, svgPath, 1.5);
+    }
+
+    public ActionCard(String title, String desc, String buttonText, String svgPath, double iconScale) {
+        // Icon
         iconShape = new SVGPath();
         iconShape.setContent(svgPath);
         iconShape.setFill(Color.web("#cbd5e1"));
-        iconShape.setScaleX(1.5);
-        iconShape.setScaleY(1.5);
+        iconShape.setScaleX(iconScale);
+        iconShape.setScaleY(iconScale);
 
-        // ===== Title =====
+        // Title
         titleLabel = new Label(title);
         titleLabel.setFont(Font.font("Segoe UI", 17));
         titleLabel.setTextFill(Color.web("#f1e8ff"));
         titleLabel.setStyle("-fx-font-weight: bold; -fx-effect: none;");
 
-        // ===== Description =====
+        // Description
         descLabel = new Label(desc);
         descLabel.setFont(Font.font("Segoe UI", 13));
         descLabel.setTextFill(Color.web("#d5c8f7"));
@@ -83,32 +90,35 @@ public class ActionCard {
         textBox.setAlignment(Pos.CENTER_LEFT);
         textBox.setMaxWidth(Double.MAX_VALUE);
 
-        // ===== Button =====
+        // Bind description width to text container to ensure proper wrapping
+        descLabel.maxWidthProperty().bind(textBox.widthProperty());
+
+        // Button
         actionButton = new Button(buttonText);
+        actionButton.setMnemonicParsing(false);
         actionButton.setFont(Font.font("Segoe UI", 13));
         actionButton.setStyle(BTN_NORMAL);
-
         actionButton.setOnMouseEntered(e -> actionButton.setStyle(BTN_HOVER));
         actionButton.setOnMouseExited(e -> actionButton.setStyle(BTN_NORMAL));
 
-        // ===== Card Container =====
+        // Card container
         root = new HBox(16, iconShape, textBox, actionButton);
         root.setAlignment(Pos.CENTER_LEFT);
         root.setPadding(new Insets(26));
         root.setMinHeight(110);
         root.setStyle(CARD_NORMAL);
+        root.setAccessibleText(title);
 
         HBox.setHgrow(textBox, Priority.ALWAYS);
 
-        // ===== Card Hover Animation (subtle) =====
         addCardHover(root);
     }
 
     private void addCardHover(HBox card) {
-        TranslateTransition up = new TranslateTransition(Duration.millis(140), card);
+        TranslateTransition up = new TranslateTransition(HOVER_DURATION, card);
         up.setToY(-2);
 
-        TranslateTransition down = new TranslateTransition(Duration.millis(140), card);
+        TranslateTransition down = new TranslateTransition(HOVER_DURATION, card);
         down.setToY(0);
 
         card.setOnMouseEntered(e -> {
@@ -124,20 +134,16 @@ public class ActionCard {
         });
     }
 
-    public HBox getRoot() {
-        return root;
+    // Convenience API
+    public void setOnAction(EventHandler<ActionEvent> handler) {
+        actionButton.setOnAction(handler);
     }
 
-    public Button getButton() {
-        return actionButton;
-    }
-
-    // اختياري: إذا بدك توصل للعنوان/الوصف لاحقاً
-    public Label getTitleLabel() {
-        return titleLabel;
-    }
-
-    public Label getDescLabel() {
-        return descLabel;
-    }
+    // Accessors
+    public HBox getRoot() { return root; }
+    public Button getButton() { return actionButton; }
+    public Button getActionButton() { return actionButton; }
+    public Label getTitleLabel() { return titleLabel; }
+    public Label getDescLabel() { return descLabel; }
+    public SVGPath getIconShape() { return iconShape; }
 }

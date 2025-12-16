@@ -1,82 +1,72 @@
 package fxShield;
 
-public class GPUStabilizer {
+public final class GPUStabilizer {
 
-    private int stable = -1;
+    private final long failGraceMs;     // hold last good value during transient failures
+    private final double alpha;         // EMA factor (0..1), higher = more responsive
+    private final int zeroConfirm;      // consecutive zeros required to accept 0
+    private final int unsupportedValue; // value to use before any valid sample
 
+    private int stable;
     private int zeroStreak = 0;
-    private int failStreak = 0;
-
     private long lastGoodMs = 0;
 
-    // tuning (runtime)
-    private final long minUpdateMs;     // مثلاً 1800
-    private final double alpha;         // مثلاً 0.22
-    private final int zeroConfirm;      // مثلاً 2 أو 3
-    private final int unsupportedValue; // مثلاً -1
-
-    private final long failGraceMs;     // مدة مسموح فيها نثبت آخر قراءة
-    private long lastUpdateMs = 0;
-
-    public GPUStabilizer(long minUpdateMs, double alpha, int zeroConfirm, int unsupportedValue) {
-        this.minUpdateMs = Math.max(250, minUpdateMs);
-        this.alpha = clampDouble(alpha, 0.08, 0.45);
+    public GPUStabilizer(long failGraceMs, double alpha, int zeroConfirm, int unsupportedValue) {
+        this.failGraceMs = Math.max(0, failGraceMs);
+        this.alpha = clampDouble(alpha, 0.05, 0.95);
         this.zeroConfirm = Math.max(1, zeroConfirm);
         this.unsupportedValue = unsupportedValue;
-
-        // خليها تقريباً 3–4 دورات من التحديث (مثلاً 1800ms => ~6-7s)
-        this.failGraceMs = Math.max(1500, this.minUpdateMs * 4);
+        this.stable = unsupportedValue;
     }
 
+    // Convenience: uses current time
+    public int update(int raw) {
+        return update(raw, System.currentTimeMillis());
+    }
+
+    // Core update
     public synchronized int update(int raw, long nowMs) {
-
-        // throttle: ما تعمل smoothing وتغيير قيمة إلا كل minUpdateMs
-        if (lastUpdateMs != 0 && (nowMs - lastUpdateMs) < minUpdateMs) {
-            return (stable < 0) ? unsupportedValue : stable;
-        }
-        lastUpdateMs = nowMs;
-
-        // raw = -1 => فشل قياس
-        if (raw < 0) {
-            failStreak++;
-
-            // إذا عندك قيمة سابقة “صالحة” وخلال فترة grace → ثبّت عليها وما تنزل 0
+        if (raw < 0) { // failed sample
             if (stable >= 0 && (nowMs - lastGoodMs) <= failGraceMs) {
-                return stable;
+                return stable; // hold during grace window
             }
-
-            // بعد grace وما في قراءة → اعتبرها unsupportedValue (مش 0)
-            stable = unsupportedValue;
-            return stable;
+            return stable; // keep unsupported or last known
         }
 
-        // raw 0..100
         raw = clampInt(raw, 0, 100);
         lastGoodMs = nowMs;
-        failStreak = 0;
 
         if (raw == 0) {
             zeroStreak++;
-
-            // تجاهل “0” المؤقت لو كانت عندك قيمة >0 ولسا ما وصلنا zeroConfirm
             if (stable > 0 && zeroStreak < zeroConfirm) {
-                return stable;
+                return stable; // ignore brief zero dips
             }
-
             stable = smooth(stable, 0);
             return stable;
         }
 
-        // raw > 0
         zeroStreak = 0;
         stable = smooth(stable, raw);
         return stable;
     }
 
+    // Resets internal state to initial conditions
+    public synchronized void reset() {
+        stable = unsupportedValue;
+        zeroStreak = 0;
+        lastGoodMs = 0;
+    }
+
+    // Returns the last stabilized value (may be unsupportedValue)
+    public synchronized int getStable() {
+        return stable;
+    }
+
     private int smooth(int prev, int next) {
-        if (prev < 0) return next;
+        if (prev < 0) return next; // first valid sample
         double v = prev + alpha * (next - prev);
-        return (int) Math.round(v);
+        // clamp after rounding to avoid drift outside bounds
+        return clampInt((int)Math.round(v), 0, 100);
     }
 
     private static int clampInt(int v, int min, int max) {
