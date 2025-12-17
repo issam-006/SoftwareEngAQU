@@ -2,9 +2,10 @@ package fxShield;
 
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
-import javafx.scene.layout.VBox;
+import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
@@ -16,7 +17,6 @@ import java.util.regex.Pattern;
 
 public final class PhysicalDiskCard {
 
-    // Caches and heuristics
     private static final Map<String, String> diskTypeCache = new ConcurrentHashMap<>();
     private static final Pattern NVME_PATTERN = Pattern.compile("\\b(nvme|nvm|pci-?e|pci express|pcie)\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern M2_PATTERN   = Pattern.compile("\\b(m\\.2|m2)\\b", Pattern.CASE_INSENSITIVE);
@@ -25,87 +25,139 @@ public final class PhysicalDiskCard {
 
     private static final boolean DEBUG = false;
 
-    // Styles and colors
     private static final String CARD_STYLE =
             "-fx-background-color: rgba(17,13,34,0.55);" +
                     "-fx-background-radius: 28;" +
                     "-fx-border-radius: 28;" +
                     "-fx-border-color: rgba(255,255,255,0.10);" +
                     "-fx-border-width: 1;" +
-                    "-fx-effect: dropshadow(gaussian, rgba(157,110,255,0.28), 25, 0.2, 0, 0);";
+                    "-fx-effect: dropshadow(gaussian, rgba(157,110,255,0.28), 25, 0.25, 0, 0);";
 
     private static final String BAR_BG = "-fx-control-inner-background: rgba(255,255,255,0.08);";
-    private static final String ACCENT_USED   = "#a78bfa"; // lavender
-    private static final String ACCENT_ACTIVE = "#7dd3fc"; // sky
+    private static final String ACCENT_USED   = "#a78bfa";
+    private static final String ACCENT_ACTIVE = "#7dd3fc";
 
-    // Reused formatter for size at construction time only
     private static final DecimalFormat SIZE_FORMAT = new DecimalFormat("0.0");
 
-    // UI
-    private final VBox root;
+    private final StackPane root;
+    private final VBox content;
+
+    // Header as StackPane: title centered, switcher fixed left
+    private StackPane headerRow;
+
     private final Label titleLabel;
     private final Label usedValueLabel;
     private final Label spaceLabel;
     private final Label activeValueLabel;
+
     private final ProgressBar usedBar;
     private final ProgressBar activeBar;
 
-    // Optional override for disk type
+    private Node switcherNode = null;
+
     private String typeOverride = null;
 
     public PhysicalDiskCard(int index, String model, double sizeGb) {
+
         String diskType = resolveDiskType(model);
 
+        // ===== Title (centered) =====
         titleLabel = new Label("Disk " + index + " • " + diskType);
         titleLabel.setTextFill(Color.web("#e9d8ff"));
         titleLabel.setFont(Font.font("Segoe UI", 20));
         titleLabel.setStyle("-fx-font-weight: bold;");
+        titleLabel.setAlignment(Pos.CENTER);
 
+        // ===== Header (StackPane) =====
+        headerRow = new StackPane();
+        headerRow.setMinHeight(36);
+        headerRow.setPadding(new Insets(0, 6, 0, 6));
+
+        StackPane.setAlignment(titleLabel, Pos.CENTER);
+        headerRow.getChildren().add(titleLabel);
+
+        // ===== Used =====
         usedValueLabel = new Label("Used: Loading...");
+        usedValueLabel.setAlignment(Pos.CENTER);
+        usedValueLabel.setMaxWidth(Double.MAX_VALUE);
         usedValueLabel.setTextFill(Color.web("#f5e8ff"));
         usedValueLabel.setFont(Font.font("Segoe UI", 17));
 
         usedBar = new ProgressBar(0);
-        usedBar.setPrefWidth(260);
+        makeBarFullWidth(usedBar);
         setBarAccent(usedBar, ACCENT_USED);
 
+        // ===== Space =====
         spaceLabel = new Label("Size: " + SIZE_FORMAT.format(sizeGb) + " GB");
+        spaceLabel.setAlignment(Pos.CENTER);
+        spaceLabel.setMaxWidth(Double.MAX_VALUE);
         spaceLabel.setTextFill(Color.web("#c5b3ff"));
         spaceLabel.setFont(Font.font("Segoe UI", 13));
 
+        // ===== Active =====
         activeValueLabel = new Label("Active: 0 %");
+        activeValueLabel.setAlignment(Pos.CENTER);
+        activeValueLabel.setMaxWidth(Double.MAX_VALUE);
         activeValueLabel.setTextFill(Color.web("#f5e8ff"));
         activeValueLabel.setFont(Font.font("Segoe UI", 17));
 
         activeBar = new ProgressBar(0);
-        activeBar.setPrefWidth(260);
+        makeBarFullWidth(activeBar);
         setBarAccent(activeBar, ACCENT_ACTIVE);
 
-        root = new VBox(14);
-        root.setPadding(new Insets(22));
-        root.setAlignment(Pos.CENTER);
-        root.setStyle(CARD_STYLE);
+        // ===== Content =====
+        content = new VBox(14);
+        content.setPadding(new Insets(22));
+        content.setAlignment(Pos.TOP_CENTER);
+        content.setStyle(CARD_STYLE);
 
-        root.setMinHeight(240);
-        root.setMinWidth(260);
-        root.setPrefWidth(0);
-        root.setMaxWidth(Double.MAX_VALUE);
+        content.setMinHeight(240);
+        content.setMinWidth(260);
+        content.setPrefWidth(0);
+        content.setMaxWidth(Double.MAX_VALUE);
 
-        root.getChildren().addAll(
-                titleLabel,
+        content.getChildren().addAll(
+                headerRow,
                 usedValueLabel,
                 usedBar,
                 spaceLabel,
                 activeValueLabel,
                 activeBar
         );
+
+        root = new StackPane(content);
+        root.setMaxWidth(Double.MAX_VALUE);
     }
 
-    // Type resolution
-    private String resolveDiskType(String model) {
-        if (typeOverride != null && !typeOverride.isBlank()) {
-            return normalizeType(typeOverride);
+    /**
+     * ضع هنا diskSwitcher.getRoot()
+     * سيظهر على يسار الهيدر، بينما العنوان يبقى بالمنتصف.
+     */
+    public void setSwitcherNode(Node node) {
+        if (headerRow == null) return;
+
+        if (switcherNode != null) {
+            headerRow.getChildren().remove(switcherNode);
         }
+
+        switcherNode = node;
+
+        if (switcherNode != null) {
+            if (switcherNode instanceof Region r) {
+                r.setMaxWidth(Region.USE_PREF_SIZE);
+                r.setMaxHeight(Region.USE_PREF_SIZE);
+            }
+
+            StackPane.setAlignment(switcherNode, Pos.CENTER_LEFT);
+            StackPane.setMargin(switcherNode, new Insets(0, 0, 0, -12));
+
+            headerRow.getChildren().add(switcherNode);
+        }
+    }
+
+    // ===== Type resolution =====
+    private String resolveDiskType(String model) {
+        if (typeOverride != null && !typeOverride.isBlank()) return normalizeType(typeOverride);
         return detectDiskType(model);
     }
 
@@ -158,7 +210,7 @@ public final class PhysicalDiskCard {
         return "Disk";
     }
 
-    // Public API
+    // ===== Public API =====
     public void setDiskInfo(int index, String model, double sizeGb) {
         String diskType = resolveDiskType(model);
         titleLabel.setText("Disk " + index + " • " + diskType);
@@ -175,8 +227,6 @@ public final class PhysicalDiskCard {
             activeBar.setProgress(0);
             return;
         }
-
-        if (DEBUG) System.out.println("PhysicalDisk[" + snap.index + "] model: " + snap.model);
 
         if (snap.typeLabel != null && !snap.typeLabel.isBlank()) {
             this.typeOverride = snap.typeLabel;
@@ -199,9 +249,14 @@ public final class PhysicalDiskCard {
         activeBar.setProgress(clamp01(snap.activePercent / 100.0));
     }
 
-    // Helpers
     private static void setBarAccent(ProgressBar bar, String accentHex) {
         bar.setStyle(BAR_BG + "-fx-accent: " + accentHex + ";");
+    }
+
+    private static void makeBarFullWidth(ProgressBar bar) {
+        bar.setMaxWidth(Double.MAX_VALUE);
+        bar.setPrefWidth(Double.MAX_VALUE);
+        VBox.setVgrow(bar, Priority.NEVER);
     }
 
     private static double clamp01(double v) {
@@ -210,8 +265,8 @@ public final class PhysicalDiskCard {
         return v;
     }
 
-    // Getters
-    public VBox getRoot() { return root; }
+    public StackPane getRoot() { return root; }
+
     public Label getUsedValueLabel() { return usedValueLabel; }
     public Label getSpaceLabel() { return spaceLabel; }
     public Label getActiveValueLabel() { return activeValueLabel; }

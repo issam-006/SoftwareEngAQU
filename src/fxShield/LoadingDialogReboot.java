@@ -9,6 +9,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.effect.Effect;
 import javafx.scene.effect.GaussianBlur;
+import javafx.scene.layout.Border;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
@@ -22,12 +23,11 @@ public final class LoadingDialogReboot {
 
     // Styles
     private static final String ROOT_STYLE =
-            "-fx-background-color: #020617;" +
-                    "-fx-background-radius: 20;" +
-                    "-fx-border-color: rgba(255,255,255,0.25);" +
-                    "-fx-border-radius: 20;" +
+            "-fx-background-color: rgba(20,20,30,0.96);" +
+                    "-fx-background-radius: 22;" +
+                    "-fx-border-color: rgba(255,255,255,0.08);" +
                     "-fx-border-width: 1.2;" +
-                    "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.55), 30, 0.25, 0, 10);";
+                    "-fx-border-radius: 22";
     private static final String BTN_PRIMARY =
             "-fx-background-color: #2563eb;" +
                     "-fx-text-fill: white;" +
@@ -150,7 +150,7 @@ public final class LoadingDialogReboot {
         // Root
         root = new VBox(14, titleLabel, messageLabel, dotsLabel, rebootNoteLabel, buttonsRow);
         root.setAlignment(Pos.CENTER);
-        root.setPadding(new Insets(26));
+        root.setPadding(new Insets(47));
         root.setMinWidth(380);
         root.setStyle(ROOT_STYLE);
 

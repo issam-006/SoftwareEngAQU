@@ -23,12 +23,12 @@ public class DashBoardPage extends Application {
     private static final Duration PS_TIMEOUT = Duration.ofSeconds(25);
 
     private Stage primaryStage;
-
     private BorderPane root;
 
     private MeterCard cpuCard;
     private MeterCard ramCard;
     private MeterCard gpuCard;
+
     private PhysicalDiskCard[] physicalCards;
 
     private final DecimalFormat percentFormat = new DecimalFormat("0.0");
@@ -103,8 +103,14 @@ public class DashBoardPage extends Application {
         disksRow = new HBox(18);
         disksRow.setAlignment(Pos.CENTER_LEFT);
 
-        // Selector instance (will be overlaid inside the top disk card)
+        // ✅ Compact switcher (no title) — will be inserted inside card header
         diskSwitcher = new PhysicalDiskSwitcher(0, 0, idx -> Platform.runLater(() -> swapTopDisk(idx)));
+
+        diskSwitcher.getRoot().setStyle(
+                "-fx-background-color: transparent;" +
+                        "-fx-padding: 0;"
+        );
+
 
         ActionCard freeRamCard = new ActionCard(
                 "Free RAM",
@@ -265,8 +271,6 @@ public class DashBoardPage extends Application {
 
                     if (initialDisks != null && initialDisks.length > 0) {
                         physicalCards = new PhysicalDiskCard[initialDisks.length];
-
-                        // Recreate row without switcher (we'll overlay it on top card)
                         disksRow.getChildren().clear();
 
                         for (int i = 0; i < initialDisks.length; i++) {
@@ -275,17 +279,12 @@ public class DashBoardPage extends Application {
                             physicalCards[i] = card;
 
                             if (i == 0) {
-                                // Overlay selector inside the top disk card (top-left)
-                                StackPane overlay = new StackPane(card.getRoot(), diskSwitcher.getRoot());
-                                StackPane.setAlignment(diskSwitcher.getRoot(), Pos.TOP_LEFT);
-                                StackPane.setMargin(diskSwitcher.getRoot(), new Insets(10, 0, 0, 10));
-                                diskSwitcher.getRoot().setStyle(
-                                        "-fx-background-color: rgba(255,255,255,0.06);" +
-                                                "-fx-background-radius: 10;" +
-                                                "-fx-padding: 4 8;"
-                                );
-                                topDiskContainer.getChildren().setAll(overlay);
-                                HBox.setHgrow(overlay, Priority.ALWAYS);
+                                // ✅ insert switcher into the card header (no overlay)
+                                card.setSwitcherNode(diskSwitcher.getRoot());
+
+                                topDiskContainer.getChildren().setAll(card.getRoot());
+                                HBox.setHgrow(topDiskContainer, Priority.ALWAYS);
+
                             } else {
                                 disksRow.getChildren().add(card.getRoot());
                                 HBox.setHgrow(card.getRoot(), Priority.ALWAYS);
@@ -294,6 +293,7 @@ public class DashBoardPage extends Application {
 
                         diskSwitcher.setCount(initialDisks.length);
                         diskSwitcher.setSelectedIndex(0);
+                        swapTopDisk(0);
 
                     } else {
                         physicalCards = new PhysicalDiskCard[0];
@@ -327,18 +327,13 @@ public class DashBoardPage extends Application {
         if (physicalCards == null || physicalCards.length == 0) return;
         if (index < 0 || index >= physicalCards.length) return;
 
-        // Replace only the disk card node inside overlay (keep switcher pinned)
-        Region node = physicalCards[index].getRoot();
-        StackPane current = (StackPane) topDiskContainer.getChildren().get(0);
-        // Child 0 = disk card, Child 1 = switcher
-        if (current.getChildren().size() == 2) {
-            current.getChildren().set(0, node);
-        } else {
-            current.getChildren().setAll(node, diskSwitcher.getRoot());
-            StackPane.setAlignment(diskSwitcher.getRoot(), Pos.TOP_LEFT);
-            StackPane.setMargin(diskSwitcher.getRoot(), new Insets(10, 0, 0, 10));
-        }
-        HBox.setHgrow(node, Priority.ALWAYS);
+        PhysicalDiskCard card = physicalCards[index];
+
+        // ✅ keep switcher in header for the new card
+        card.setSwitcherNode(diskSwitcher.getRoot());
+
+        topDiskContainer.getChildren().setAll(card.getRoot());
+        HBox.setHgrow(topDiskContainer, Priority.ALWAYS);
     }
 
     private void updateCpuUI(double percent) {
@@ -425,7 +420,6 @@ public class DashBoardPage extends Application {
 
     private void runOptimizeDisk() {
         System.out.println("[ACTION] Optimize Disk clicked");
-        // Hook your disk optimization flow or dialog here if needed
     }
 
     private void runOptimizeNetwork() {
@@ -448,7 +442,6 @@ public class DashBoardPage extends Application {
 
     private void runScanAndFix() {
         System.out.println("[ACTION] Scan & Fix Files clicked");
-        // Add actual scan/repair logic or a dedicated dialog (SFC/DISM) if desired
     }
 
     private void runModes() {
@@ -461,23 +454,6 @@ public class DashBoardPage extends Application {
         runFreeRam();
         runOptimizeDisk();
         runOptimizeNetwork();
-    }
-
-    private void runPowerShellWithDialog(String dialogTitle, String dialogMessage, String psScript, String logTag) {
-        int minLoadingSeconds = 8;
-        LoadingDialog dialog = LoadingDialog.show(primaryStage, dialogTitle, dialogMessage);
-
-        new Thread(() -> {
-            long start = System.currentTimeMillis();
-            boolean ok = runPowerShellSync(psScript, logTag);
-            long elapsed = System.currentTimeMillis() - start;
-            long remain = Math.max(0, minLoadingSeconds * 1000L - elapsed);
-            try { Thread.sleep(remain); } catch (InterruptedException ignored) {}
-            Platform.runLater(() -> {
-                if (ok) dialog.setDone("Completed successfully");
-                else dialog.setFailed("An error occurred while running the command.");
-            });
-        }, "fxShield-action-ps").start();
     }
 
     private void runPowerShellWithRebootDialog(String dialogTitle, String dialogMessage, String psScript, String logTag) {
