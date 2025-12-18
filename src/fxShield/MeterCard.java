@@ -119,6 +119,7 @@ public final class MeterCard {
             root.setPadding(new Insets(12));
             root.setSpacing(8);
             root.setMinWidth(200);
+            root.setPrefWidth(240);
             root.setMinHeight(180);
         } else {
             titleLabel.setFont(Font.font("Segoe UI", 20));
@@ -127,6 +128,7 @@ public final class MeterCard {
             root.setPadding(new Insets(22));
             root.setSpacing(14);
             root.setMinWidth(280);
+            root.setPrefWidth(320);
             root.setMinHeight(240);
         }
     }

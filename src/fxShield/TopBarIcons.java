@@ -113,10 +113,16 @@ public class TopBarIcons {
         closeCircle.setOnMouseExited(e -> closeCircle.setStyle(CIRCLE_NORMAL + "-fx-background-color: rgba(248, 113, 113, 0.15);"));
         closeCircle.setOnMouseClicked(e -> {
             StageUtil.withOwner(closeCircle, owner -> {
-                // Trigger close request so DashBoardPage's onCloseRequest runs
-                owner.fireEvent(new javafx.stage.WindowEvent(owner, javafx.stage.WindowEvent.WINDOW_CLOSE_REQUEST));
-                javafx.application.Platform.exit();
-                System.exit(0);
+                // Check if tray is supported, if so, just hide
+                DashBoardPage app = (DashBoardPage) owner.getProperties().get("appInstance");
+                if (app != null && app.isTraySupported()) {
+                    owner.setIconified(true);
+                    owner.hide(); // Hide from taskbar, stay in tray
+                } else {
+                    owner.fireEvent(new javafx.stage.WindowEvent(owner, javafx.stage.WindowEvent.WINDOW_CLOSE_REQUEST));
+                    javafx.application.Platform.exit();
+                    System.exit(0);
+                }
             });
         });
 

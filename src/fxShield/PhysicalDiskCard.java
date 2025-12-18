@@ -153,6 +153,7 @@ public final class PhysicalDiskCard {
         root.setMaxWidth(520);
         root.setMinWidth(280);
         root.setPrefWidth(320);
+        root.setMinHeight(240);
     }
 
     /**
@@ -317,6 +318,7 @@ public final class PhysicalDiskCard {
 
             root.setMinWidth(200);
             root.setPrefWidth(240);
+            root.setMinHeight(180);
         } else {
             titleLabel.setFont(Font.font("Segoe UI", 20));
             usedValueLabel.setFont(Font.font("Segoe UI", 17));
@@ -337,6 +339,7 @@ public final class PhysicalDiskCard {
 
             root.setMinWidth(280);
             root.setPrefWidth(320);
+            root.setMinHeight(240);
         }
     }
 

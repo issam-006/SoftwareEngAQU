@@ -156,7 +156,13 @@ public final class SettingsDialog {
             ns.autoFreeRam = vFree[0];
             ns.autoOptimizeHardDisk = vDisk[0];
             ns.autoStartWithWindows = vStart[0];
+            
+            // Save to persistent store
             SettingsStore.save(ns);
+            
+            // Apply changes immediately to running service
+            AutomationService.get().apply(ns);
+            
             dialog.close();
         });
 

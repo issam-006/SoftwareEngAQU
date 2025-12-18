@@ -64,6 +64,16 @@ public final class WindowsStartupManager {
     // If running from jar: use javaw.exe -jar "<path>"; else quote executable path.
     private static String startupCommand() {
         try {
+            // 1. Try ProcessHandle (most accurate for jpackaged EXE)
+            var info = ProcessHandle.current().info();
+            if (info.command().isPresent()) {
+                String cmd = info.command().get();
+                if (cmd.endsWith(".exe")) {
+                    return "\"" + cmd + "\" --minimized";
+                }
+            }
+
+            // 2. Fallback to code source
             File loc = new File(WindowsStartupManager.class.getProtectionDomain()
                     .getCodeSource().getLocation().toURI());
             String path = loc.getAbsolutePath();

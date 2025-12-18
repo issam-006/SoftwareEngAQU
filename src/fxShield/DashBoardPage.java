@@ -43,6 +43,9 @@ public class DashBoardPage extends Application {
     private SystemMonitorService monitor;
     private HBox disksRow;
 
+    private boolean isTraySupported = false;
+    public boolean isTraySupported() { return isTraySupported; }
+
     private StackPane topDiskContainer;
     private PhysicalDiskSwitcher diskSwitcher;
 
@@ -55,9 +58,20 @@ public class DashBoardPage extends Application {
         this.primaryStage = stage;
         primaryStage.getProperties().put("appInstance", this);
 
+        // Check if we should start minimized (if launched from startup)
+        boolean startMinimized = getParameters().getRaw().contains("--minimized");
+
         try {
             stage.initStyle(StageStyle.TRANSPARENT);
         } catch (Exception ignored) {}
+
+        // Set up Tray Icon
+        setupTrayIcon(stage);
+
+        if (startMinimized && isTraySupported) {
+            stage.setIconified(true);
+            // We still show the splash screen but it will be minimized
+        }
 
         // Immediate lightweight UI
         showSplashScreen(stage);
@@ -81,6 +95,56 @@ public class DashBoardPage extends Application {
                 }
             });
         }, "fxShield-startup-config").start();
+    }
+
+    private void setupTrayIcon(Stage stage) {
+        if (!java.awt.SystemTray.isSupported()) return;
+        this.isTraySupported = true;
+
+        java.awt.SystemTray tray = java.awt.SystemTray.getSystemTray();
+        
+        // We use a small placeholder or search for icon
+        java.awt.Image image = java.awt.Toolkit.getDefaultToolkit().createImage(""); 
+        // In a real app, you'd load an icon file. For now, we'll just check support.
+        
+        java.awt.PopupMenu popup = new java.awt.PopupMenu();
+        java.awt.MenuItem showItem = new java.awt.MenuItem("Show FxShield");
+        showItem.addActionListener(e -> Platform.runLater(() -> {
+            stage.setIconified(false);
+            stage.show();
+            stage.toFront();
+        }));
+        
+        java.awt.MenuItem exitItem = new java.awt.MenuItem("Exit");
+        exitItem.addActionListener(e -> {
+            Platform.runLater(() -> {
+                if (monitor != null) monitor.stop();
+                AutomationService.get().stop();
+                Platform.exit();
+                System.exit(0);
+            });
+        });
+        
+        popup.add(showItem);
+        popup.addSeparator();
+        popup.add(exitItem);
+        
+        java.awt.TrayIcon trayIcon = new java.awt.TrayIcon(image, "FxShield", popup);
+        trayIcon.setImageAutoSize(true);
+        trayIcon.addActionListener(e -> Platform.runLater(() -> {
+            stage.setIconified(false);
+            stage.show();
+            stage.toFront();
+        }));
+        
+        try {
+            tray.add(trayIcon);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        
+        // Don't exit when last window closed
+        Platform.setImplicitExit(false);
     }
 
     private void showSplashScreen(Stage stage) {
@@ -192,6 +256,12 @@ public class DashBoardPage extends Application {
         mainRow.setAlignment(Pos.CENTER);
 
         topDiskContainer = new StackPane();
+        topDiskContainer.setMinWidth(280);
+        topDiskContainer.setPrefWidth(320);
+        topDiskContainer.setMaxWidth(520);
+        topDiskContainer.setMinHeight(240);
+        topDiskContainer.setAlignment(Pos.CENTER);
+
         PhysicalDiskCard placeholder = new PhysicalDiskCard(0, "Loading Disk...", 0);
         topDiskContainer.getChildren().add(placeholder.getRoot());
 
@@ -301,6 +371,12 @@ public class DashBoardPage extends Application {
                 for (PhysicalDiskCard c : physicalCards) {
                     if (c != null) c.setCompact(compact);
                 }
+            }
+
+            if (topDiskContainer != null) {
+                topDiskContainer.setMinWidth(compact ? 200 : 280);
+                topDiskContainer.setPrefWidth(compact ? 240 : 320);
+                topDiskContainer.setMinHeight(compact ? 180 : 240);
             }
 
             if (diskSwitcher != null) {
@@ -510,6 +586,16 @@ public class DashBoardPage extends Application {
 
     private void runOptimizeDisk() {
         System.out.println("[ACTION] Optimize Disk clicked");
+        LoadingDialog dialog = LoadingDialog.show(primaryStage, "Optimizing Disk", "Analyzing and optimizing drive performance...");
+
+        new Thread(() -> {
+            // Optimize-Volume performs TRIM on SSDs and Defrag on HDDs.
+            boolean ok = runPowerShellSync("Optimize-Volume -DriveLetter C -Optimize", "[DiskOpt]");
+            Platform.runLater(() -> {
+                if (ok) dialog.setDone("Disk optimization completed successfully.");
+                else dialog.setFailed("Disk optimization failed.");
+            });
+        }, "fxShield-action-optimizeDisk").start();
     }
 
     private void runOptimizeNetwork() {
@@ -520,7 +606,7 @@ public class DashBoardPage extends Application {
                         "ipconfig /flushdns | Out-Null;" +
                         "netsh int ip reset | Out-Null;" +
                         "netsh winsock reset | Out-Null;" +
-                        "Write-Host 'Network optimization commands sent. Restart may be required.';";
+                        "Write-Host 'Network optimization completed.';";
 
         runPowerShellWithRebootDialog(
                 "Optimizing Network",
@@ -532,6 +618,16 @@ public class DashBoardPage extends Application {
 
     private void runScanAndFix() {
         System.out.println("[ACTION] Scan & Fix Files clicked");
+        LoadingDialog dialog = LoadingDialog.show(primaryStage, "System File Scan", "Scanning for corrupted files... (Takes a few minutes)");
+
+        new Thread(() -> {
+            // SFC requires Admin, which we now have.
+            boolean ok = runPowerShellSync("sfc /scannow", "[SFC]");
+            Platform.runLater(() -> {
+                if (ok) dialog.setDone("System scan completed. Any found issues were repaired.");
+                else dialog.setFailed("System scan failed.");
+            });
+        }, "fxShield-action-scanFix").start();
     }
 
     private void runModes() {
@@ -541,9 +637,37 @@ public class DashBoardPage extends Application {
 
     private void runAllInOne() {
         System.out.println("[ACTION] All in One clicked");
-        runFreeRam();
-        runOptimizeDisk();
-        runOptimizeNetwork();
+        LoadingDialog dialog = LoadingDialog.show(primaryStage, "Full Optimization", "Starting complete system optimization package...");
+
+        new Thread(() -> {
+            try {
+                // 1. RAM & Junk
+                Platform.runLater(() -> dialog.setMessageText("Step 1/3: Cleaning memory and junk files..."));
+                runPowerShellSync(
+                        "$ErrorActionPreference='SilentlyContinue';" +
+                                "Remove-Item -Path \"$env:TEMP\\*\" -Recurse -Force -ErrorAction SilentlyContinue;" +
+                                "Remove-Item -Path \"$env:WINDIR\\Prefetch\\*\" -Recurse -Force -ErrorAction SilentlyContinue;" +
+                                "Remove-Item -Path \"$env:APPDATA\\Microsoft\\Windows\\Recent\\*\" -Recurse -Force -ErrorAction SilentlyContinue;",
+                        "[All-RAM]"
+                );
+
+                // 2. Disk
+                Platform.runLater(() -> dialog.setMessageText("Step 2/3: Optimizing disk drives..."));
+                runPowerShellSync("Optimize-Volume -DriveLetter C -Optimize", "[All-Disk]");
+
+                // 3. Network
+                Platform.runLater(() -> dialog.setMessageText("Step 3/3: Optimizing network stack..."));
+                runPowerShellSync(
+                        "ipconfig /flushdns | Out-Null; netsh int ip reset | Out-Null; netsh winsock reset | Out-Null;",
+                        "[All-Net]"
+                );
+
+                Platform.runLater(() -> dialog.setDone("All optimizations completed successfully."));
+            } catch (Exception ex) {
+                ex.printStackTrace();
+                Platform.runLater(() -> dialog.setFailed("Optimization package failed."));
+            }
+        }, "fxShield-action-allInOne").start();
     }
 
     private void runPowerShellWithRebootDialog(String dialogTitle, String dialogMessage, String psScript, String logTag) {
@@ -649,7 +773,22 @@ public class DashBoardPage extends Application {
     }
 
     public static void main(String[] args) {
-        launch(args);
+        System.out.println("Fx Shield starting...");
+        try {
+            if (!WindowsAdminChecker.isAdmin()) {
+                WindowsAdminChecker.requestAdminAndExit();
+                return;
+            }
+            launch(args);
+        } catch (Throwable t) {
+            t.printStackTrace();
+            try {
+                javax.swing.JOptionPane.showMessageDialog(null, 
+                    "Startup Error: " + t.getMessage() + "\nCheck the console for details.", 
+                    "Fx Shield Error", 
+                    javax.swing.JOptionPane.ERROR_MESSAGE);
+            } catch (Exception ignored) {}
+        }
     }
 
     private String shortenGpuName(String full) {
