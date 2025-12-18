@@ -1,15 +1,21 @@
 package fxShield;
 
+import javafx.animation.FadeTransition;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Label;
+import javafx.scene.control.ProgressBar;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.stage.Stage;
+import javafx.stage.StageStyle;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -40,49 +46,150 @@ public class DashBoardPage extends Application {
     private StackPane topDiskContainer;
     private PhysicalDiskSwitcher diskSwitcher;
 
+    private ActionCard[] actionCards;
+    private GridPane toolsGrid;
+    private int currentCols = -1;
+
     @Override
     public void start(Stage stage) {
         this.primaryStage = stage;
         primaryStage.getProperties().put("appInstance", this);
 
-        RemoteConfigService configService = new RemoteConfigService();
-        RemoteConfig config = configService.fetchConfig();
+        try {
+            stage.initStyle(StageStyle.TRANSPARENT);
+        } catch (Exception ignored) {}
 
-        if (config != null && "maintenance".equalsIgnoreCase(config.getAppStatus())) {
-            MaintenanceDialog.show(primaryStage, config, () -> {
-                RemoteConfig retryConfig = configService.fetchConfig();
-                if (retryConfig != null && !"maintenance".equalsIgnoreCase(retryConfig.getAppStatus())) {
-                    Platform.runLater(() -> launchNormalUi(primaryStage, retryConfig));
-                    return true;
+        // Immediate lightweight UI
+        showSplashScreen(stage);
+
+        new Thread(() -> {
+            RemoteConfigService configService = new RemoteConfigService();
+            RemoteConfig config = configService.fetchConfig();
+
+            Platform.runLater(() -> {
+                if (config != null && "maintenance".equalsIgnoreCase(config.getAppStatus())) {
+                    MaintenanceDialog.show(primaryStage, config, () -> {
+                        RemoteConfig retryConfig = configService.fetchConfig();
+                        if (retryConfig != null && !"maintenance".equalsIgnoreCase(retryConfig.getAppStatus())) {
+                            Platform.runLater(() -> launchNormalUi(primaryStage, retryConfig));
+                            return true;
+                        }
+                        return false;
+                    });
+                } else {
+                    launchNormalUi(primaryStage, config);
                 }
-                return false;
             });
-            return;
-        }
+        }, "fxShield-startup-config").start();
+    }
 
-        launchNormalUi(primaryStage, config);
+    private void showSplashScreen(Stage stage) {
+        BorderPane splashRoot = new BorderPane();
+        splashRoot.setPadding(new Insets(0, 22, 12, 22));
+
+        // Dynamic style for rounded corners
+        Runnable updateStyle = () -> {
+            if (stage.isFullScreen()) {
+                splashRoot.setStyle("-fx-background-color: #020617; -fx-background-radius: 0; -fx-border-radius: 0; -fx-border-width: 0;");
+            } else {
+                splashRoot.setStyle("-fx-background-color: #020617; -fx-background-radius: 24; -fx-border-radius: 24; -fx-border-color: rgba(147,197,253,0.3); -fx-border-width: 1.5;");
+            }
+        };
+        updateStyle.run();
+        stage.fullScreenProperty().addListener((obs, oldVal, newVal) -> updateStyle.run());
+
+        TopBarIcons topIcons = new TopBarIcons();
+        WindowsSnapLayouts snapLayouts = new WindowsSnapLayouts();
+        snapLayouts.install(stage, topIcons.getMaximizeButton());
+        for (Node n : topIcons.getInteractiveNodes()) snapLayouts.addInteractive(n);
+
+        Node topIconsRoot = topIcons.getRoot();
+        
+        // Use a header for splash too to allow better dragging
+        Region splashSpacer = new Region();
+        HBox.setHgrow(splashSpacer, Priority.ALWAYS);
+        HBox splashHeader = new HBox(splashSpacer, topIconsRoot);
+        splashHeader.setPadding(new Insets(32, 0, 0, 0)); // Move top padding here
+        splashHeader.setPickOnBounds(true);
+        
+        // Native drag-and-move
+        snapLayouts.setDragArea(splashHeader);
+
+        splashRoot.setTop(splashHeader);
+
+        VBox centerBox = new VBox(25);
+        centerBox.setAlignment(Pos.CENTER);
+
+        Label title = new Label("FX SHIELD");
+        title.setFont(Font.font("Segoe UI", 52));
+        title.setTextFill(Color.web("#93C5FD"));
+        title.setStyle("-fx-font-weight: bold; -fx-letter-spacing: 5;");
+
+        ProgressBar progress = new ProgressBar();
+        progress.setPrefWidth(320);
+        progress.setPrefHeight(6);
+        progress.setStyle("-fx-accent: #3b82f6; -fx-control-inner-background: rgba(255,255,255,0.1);");
+
+        Label status = new Label("Connecting to server...");
+        status.setFont(Font.font("Segoe UI", 15));
+        status.setTextFill(Color.web("#64748b"));
+
+        centerBox.getChildren().addAll(title, progress, status);
+        splashRoot.setCenter(centerBox);
+
+        Scene scene = new Scene(splashRoot, 1280, 720, Color.TRANSPARENT);
+        stage.setTitle("FX Shield - Loading");
+        stage.setScene(scene);
+        stage.setFullScreen(true);
+        stage.setFullScreenExitHint("");
+        stage.show();
     }
 
     private void launchNormalUi(Stage stage, RemoteConfig config) {
         root = new BorderPane();
-        root.setPadding(new Insets(32, 22, 12, 22));
-        root.setStyle("-fx-background-color: linear-gradient(to bottom, #020617, #0f172a);");
+        root.setPadding(new Insets(0, 22, 12, 22));
+
+        // Dynamic style for rounded corners & borders
+        Runnable updateStyle = () -> {
+            if (stage.isFullScreen()) {
+                root.setStyle("-fx-background-color: linear-gradient(to bottom, #020617, #0f172a); -fx-background-radius: 0; -fx-border-radius: 0; -fx-border-width: 0;");
+            } else {
+                root.setStyle("-fx-background-color: linear-gradient(to bottom, #020617, #0f172a); -fx-background-radius: 24; -fx-border-radius: 24; -fx-border-color: rgba(147,197,253,0.3); -fx-border-width: 1.5;");
+            }
+        };
+        updateStyle.run();
+        stage.fullScreenProperty().addListener((obs, oldVal, newVal) -> updateStyle.run());
 
         Label appTitle = new Label("Fx Shield - System Monitor & Optimizer ");
         appTitle.setFont(Font.font("Segoe UI", 22));
         appTitle.setStyle("-fx-font-weight: bold;");
         appTitle.setTextFill(Color.web("#93C5FD"));
-        appTitle.setPadding(new Insets(0, 0, 20, 0));
 
-        root.setTop(appTitle);
-        BorderPane.setAlignment(appTitle, Pos.TOP_LEFT);
+        TopBarIcons topIcons = new TopBarIcons();
+        WindowsSnapLayouts snapLayouts = new WindowsSnapLayouts();
+        snapLayouts.install(stage, topIcons.getMaximizeButton());
+        for (Node n : topIcons.getInteractiveNodes()) snapLayouts.addInteractive(n);
+
+        Region headerSpacer = new Region();
+        HBox.setHgrow(headerSpacer, Priority.ALWAYS);
+
+        HBox header = new HBox(appTitle, headerSpacer, topIcons.getRoot());
+        header.setAlignment(Pos.CENTER_LEFT);
+        header.setPadding(new Insets(32, 0, 20, 0)); // Moved top padding here
+        header.setPickOnBounds(true);
+
+        // Native drag-and-move via HTCAPTION support in WindowsSnapLayouts
+        snapLayouts.setDragArea(header);
+
+        root.setTop(header);
+        BorderPane.setAlignment(header, Pos.TOP_LEFT);
 
         cpuCard = new MeterCard("CPU");
         ramCard = new MeterCard("RAM");
         gpuCard = new MeterCard("GPU");
 
         HBox mainRow = new HBox(18);
-        mainRow.setAlignment(Pos.CENTER_LEFT);
+        mainRow.setAlignment(Pos.CENTER);
 
         topDiskContainer = new StackPane();
         PhysicalDiskCard placeholder = new PhysicalDiskCard(0, "Loading Disk...", 0);
@@ -101,7 +208,7 @@ public class DashBoardPage extends Application {
         HBox.setHgrow(gpuCard.getRoot(), Priority.ALWAYS);
 
         disksRow = new HBox(18);
-        disksRow.setAlignment(Pos.CENTER_LEFT);
+        disksRow.setAlignment(Pos.CENTER);
 
         // ✅ Compact switcher (no title) — will be inserted inside card header
         diskSwitcher = new PhysicalDiskSwitcher(0, 0, idx -> Platform.runLater(() -> swapTopDisk(idx)));
@@ -112,142 +219,125 @@ public class DashBoardPage extends Application {
         );
 
 
-        ActionCard freeRamCard = new ActionCard(
-                "Free RAM",
-                "Clean memory and free resources",
-                "Run",
-                "M10 2 L14 2 L8 14 L4 14 Z"
-        );
+        actionCards = new ActionCard[] {
+                new ActionCard("Free RAM", "Clean memory and free resources", "Run", "M10 2 L14 2 L8 14 L4 14 Z"),
+                new ActionCard("Optimize Disk", "Clean & minimize disk usage", "Optimize", "M3 5 H13 V11 H3 Z M6 8 A1 1 0 1 0 6 8.01\n"),
+                new ActionCard("Optimize Network", "Flush DNS & reset tweaks", "Optimize", "M8 2 L10 6 L8 14 L6 6 Z M7 6 H9\n"),
+                new ActionCard("Scan & Fix Files", "Scan system and fix corrupted files", "Scan", "M4 4 H14 V14 H4 Z M7 7 L11 11 M11 7 L7 11"),
+                new ActionCard("Power Modes", "Switch power / balanced / performance", "Open", "M7 2 L11 8 H8 L10 14 L5 8 H8 Z\n"),
+                new ActionCard("One Click", "Run full optimization package", "Boost", "M3 6 L8 2 L13 6 L13 14 H3 Z")
+        };
 
-        ActionCard optimizeDiskCard = new ActionCard(
-                "Optimize Disk",
-                "Clean & minimize disk usage",
-                "Optimize",
-                "M3 5 H13 V11 H3 Z M6 8 A1 1 0 1 0 6 8.01\n"
-        );
+        actionCards[0].getButton().setOnAction(e -> runFreeRam());
+        actionCards[1].getButton().setOnAction(e -> runOptimizeDisk());
+        actionCards[2].getButton().setOnAction(e -> runOptimizeNetwork());
+        actionCards[3].getButton().setOnAction(e -> runScanAndFix());
+        actionCards[4].getButton().setOnAction(e -> runModes());
+        actionCards[5].getButton().setOnAction(e -> runAllInOne());
 
-        ActionCard optimizeNetCard = new ActionCard(
-                "Optimize Network",
-                "Flush DNS & reset tweaks",
-                "Optimize",
-                "M8 2 L10 6 L8 14 L6 6 Z M7 6 H9\n"
-        );
-
-        ActionCard scanFixCard = new ActionCard(
-                "Scan & Fix Files",
-                "Scan system and fix corrupted files",
-                "Scan",
-                "M4 4 H14 V14 H4 Z M7 7 L11 11 M11 7 L7 11"
-        );
-
-        ActionCard modesCard = new ActionCard(
-                "Power Modes",
-                "Switch power / balanced / performance",
-                "Open",
-                "M7 2 L11 8 H8 L10 14 L5 8 H8 Z\n"
-        );
-
-        ActionCard allInOneCard = new ActionCard(
-                "One Click",
-                "Run full optimization package",
-                "Boost",
-                "M3 6 L8 2 L13 6 L13 14 H3 Z"
-        );
-
-        freeRamCard.getButton().setOnAction(e -> runFreeRam());
-        optimizeNetCard.getButton().setOnAction(e -> runOptimizeNetwork());
-        optimizeDiskCard.getButton().setOnAction(e -> runOptimizeDisk());
-        scanFixCard.getButton().setOnAction(e -> runScanAndFix());
-        modesCard.getButton().setOnAction(e -> runModes());
-        allInOneCard.getButton().setOnAction(e -> runAllInOne());
-
-        GridPane toolsGrid = new GridPane();
+        toolsGrid = new GridPane();
         toolsGrid.setHgap(18);
         toolsGrid.setVgap(18);
         toolsGrid.setPadding(new Insets(12, 0, 0, 0));
 
-        toolsGrid.add(freeRamCard.getRoot(), 0, 0);
-        toolsGrid.add(optimizeDiskCard.getRoot(), 1, 0);
-        toolsGrid.add(optimizeNetCard.getRoot(), 2, 0);
-        toolsGrid.add(scanFixCard.getRoot(), 0, 1);
-        toolsGrid.add(modesCard.getRoot(), 1, 1);
-        toolsGrid.add(allInOneCard.getRoot(), 2, 1);
-
-        GridPane.setHgrow(freeRamCard.getRoot(), Priority.ALWAYS);
-        GridPane.setHgrow(optimizeDiskCard.getRoot(), Priority.ALWAYS);
-        GridPane.setHgrow(optimizeNetCard.getRoot(), Priority.ALWAYS);
-        GridPane.setHgrow(scanFixCard.getRoot(), Priority.ALWAYS);
-        GridPane.setHgrow(modesCard.getRoot(), Priority.ALWAYS);
-        GridPane.setHgrow(allInOneCard.getRoot(), Priority.ALWAYS);
-
-        GridPane.setVgrow(freeRamCard.getRoot(), Priority.ALWAYS);
-        GridPane.setVgrow(optimizeDiskCard.getRoot(), Priority.ALWAYS);
-        GridPane.setVgrow(optimizeNetCard.getRoot(), Priority.ALWAYS);
-        GridPane.setVgrow(scanFixCard.getRoot(), Priority.ALWAYS);
-        GridPane.setVgrow(modesCard.getRoot(), Priority.ALWAYS);
-        GridPane.setVgrow(allInOneCard.getRoot(), Priority.ALWAYS);
-
-        for (int i = 0; i < 3; i++) {
-            ColumnConstraints col = new ColumnConstraints();
-            col.setHgrow(Priority.ALWAYS);
-            col.setPercentWidth(33.33);
-            toolsGrid.getColumnConstraints().add(col);
-        }
+        reconfigureToolsGrid(3);
 
         VBox actionsWrapper = new VBox(28);
         actionsWrapper.setPadding(new Insets(28, 32, 40, 32));
         actionsWrapper.setStyle(
-                "-fx-background-color: rgba(147,197,253,0.18);" +
+                "-fx-background-color: rgba(147,197,253,0.12);" +
                         "-fx-background-radius: 26;" +
-                        "-fx-border-color: rgba(255,255,255,0.25);" +
+                        "-fx-border-color: rgba(255,255,255,0.15);" +
                         "-fx-border-radius: 26;" +
                         "-fx-border-width: 1;" +
-                        "-fx-effect: dropshadow(gaussian, rgba(147,197,253,0.80), 1, 0.7, 0, 0)," +
-                        " dropshadow(gaussian, rgba(147,197,253,0.35), 20, 0.4, 0, 0)," +
-                        " dropshadow(gaussian, rgba(147,197,253,0.55), 35, 0.5, 0, 0);"
+                        "-fx-effect: dropshadow(gaussian, rgba(147,197,253,0.15), 15, 0, 0, 0);"
         );
 
         actionsWrapper.setBorder(new Border(new BorderStroke(
-                Color.rgb(147, 197, 253, 0.25),
+                Color.rgb(147, 197, 253, 0.2),
                 BorderStrokeStyle.SOLID,
-                new CornerRadii(22),
-                new BorderWidths(1.4)
+                new CornerRadii(26),
+                new BorderWidths(1)
         )));
 
         Label actionsTitle = new Label("Quick Optimization Tools");
         actionsTitle.setFont(Font.font("Segoe UI", 22));
-        actionsTitle.setTextFill(Color.web("#000000"));
+        actionsTitle.setTextFill(Color.web("#f8fafc"));
         actionsTitle.setStyle("-fx-font-weight: bold;");
+        actionsTitle.setPadding(new Insets(0, 0, 10, 0));
 
-        TopBarIcons topIcons = new TopBarIcons();
-
-        HBox titleRow = new HBox();
-        titleRow.setAlignment(Pos.CENTER_LEFT);
-        titleRow.setPadding(new Insets(0, 0, 10, 0));
-
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
-
-        titleRow.getChildren().addAll(actionsTitle, spacer, topIcons.getRoot());
-        actionsWrapper.getChildren().add(titleRow);
+        actionsWrapper.getChildren().add(actionsTitle);
         actionsWrapper.getChildren().add(toolsGrid);
 
         VBox centerBox = new VBox(28);
         centerBox.setFillWidth(true);
         centerBox.getChildren().addAll(mainRow, disksRow, actionsWrapper);
 
-        root.setCenter(centerBox);
+        ScrollPane scrollPane = new ScrollPane(centerBox);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scrollPane.setStyle("-fx-background: transparent; -fx-background-color: transparent; -fx-padding: 0;");
+        scrollPane.setFocusTraversable(false);
 
-        Scene scene = new Scene(root, 1280, 720);
+        root.setCenter(scrollPane);
+
+        Scene scene = new Scene(root, 1280, 720, Color.TRANSPARENT);
+        scene.getStylesheets().add("data:text/css," + encodeCss(SCROLL_CSS));
         stage.setTitle("FX Shield - System Monitor & Optimizer");
-        stage.setScene(scene);
-        stage.setMaximized(true);
-        stage.show();
 
-        AutomationService.get().apply(SettingsStore.load());
+        // Dynamic Layout: Adjust tools grid & switcher size when window resizes
+        scene.widthProperty().addListener((obs, oldW, newW) -> {
+            double w = newW.doubleValue();
+            int cols = 3;
+            if (w < 880) cols = 1;
+            else if (w < 1350) cols = 2;
+            reconfigureToolsGrid(cols);
+
+            boolean compact = w < 1350;
+            if (cpuCard != null) cpuCard.setCompact(compact);
+            if (ramCard != null) ramCard.setCompact(compact);
+            if (gpuCard != null) gpuCard.setCompact(compact);
+            if (physicalCards != null) {
+                for (PhysicalDiskCard c : physicalCards) {
+                    if (c != null) c.setCompact(compact);
+                }
+            }
+
+            if (diskSwitcher != null) {
+                diskSwitcher.setVeryCompact(w < 1100);
+            }
+
+            appTitle.setVisible(w > 650);
+            appTitle.setManaged(w > 650);
+        });
+
+        // ✅ Enhance: Smooth Fade-in
+        root.setOpacity(0);
+        FadeTransition ft = new FadeTransition(javafx.util.Duration.millis(650), root);
+        ft.setFromValue(0);
+        ft.setToValue(1);
+
+        stage.setScene(scene);
+        stage.setFullScreen(true);
+        stage.setFullScreenExitHint("");
+        stage.show();
+        ft.play();
+
+        // Resource optimization: Stop monitor when app is minimized
+        stage.iconifiedProperty().addListener((obs, minimized, restored) -> {
+            if (minimized) {
+                if (monitor != null) monitor.stop();
+            } else {
+                if (monitor != null) monitor.start();
+            }
+        });
 
         new Thread(() -> {
             try {
+                // Background task: Automation (PowerShell calls inside)
+                AutomationService.get().apply(SettingsStore.load());
+
+                // Background task: Monitor
                 SystemMonitorService m = new SystemMonitorService();
 
                 SystemMonitorService.PhysicalDiskSnapshot[] initialDisks = m.sampleDisksOnce();
@@ -276,6 +366,7 @@ public class DashBoardPage extends Application {
                         for (int i = 0; i < initialDisks.length; i++) {
                             SystemMonitorService.PhysicalDiskSnapshot snap = initialDisks[i];
                             PhysicalDiskCard card = new PhysicalDiskCard(i, snap.model, snap.sizeGb);
+                            card.setCompact(stage.getScene().getWidth() < 1350);
                             physicalCards[i] = card;
 
                             if (i == 0) {
@@ -346,7 +437,6 @@ public class DashBoardPage extends Application {
 
     private void updateRamUI(SystemMonitorService.RamSnapshot snap) {
         if (snap == null) return;
-        cpuCard.getExtraLabel().setText("System CPU usage");
         double percent = snap.percent;
         ramCard.setValuePercent(percent, gbFormat.format(snap.usedGb) + " / " + gbFormat.format(snap.totalGb) + " GB");
     }
@@ -501,6 +591,61 @@ public class DashBoardPage extends Application {
             ex.printStackTrace();
             return false;
         }
+    }
+
+    private void reconfigureToolsGrid(int cols) {
+        if (toolsGrid == null || actionCards == null) return;
+        if (cols == currentCols) return;
+        currentCols = cols;
+
+        toolsGrid.getChildren().clear();
+        toolsGrid.getColumnConstraints().clear();
+
+        for (int i = 0; i < cols; i++) {
+            ColumnConstraints cc = new ColumnConstraints();
+            cc.setPercentWidth(100.0 / cols);
+            cc.setHgrow(Priority.ALWAYS);
+            toolsGrid.getColumnConstraints().add(cc);
+        }
+
+        for (int i = 0; i < actionCards.length; i++) {
+            int row = i / cols;
+            int col = i % cols;
+            toolsGrid.add(actionCards[i].getRoot(), col, row);
+            GridPane.setHgrow(actionCards[i].getRoot(), Priority.ALWAYS);
+            GridPane.setVgrow(actionCards[i].getRoot(), Priority.ALWAYS);
+        }
+    }
+
+    private static final String SCROLL_CSS = """
+        .scroll-pane { -fx-background-color: transparent; -fx-background: transparent; -fx-padding: 0; }
+        .scroll-pane > .viewport { -fx-background-color: transparent; }
+
+        .scroll-bar:vertical { -fx-background-color: transparent; -fx-padding: 2; }
+        .scroll-bar:vertical .track {
+            -fx-background-color: rgba(255,255,255,0.04);
+            -fx-background-radius: 999;
+        }
+        .scroll-bar:vertical .thumb {
+            -fx-background-color: rgba(255,255,255,0.22);
+            -fx-background-radius: 999;
+        }
+        .scroll-bar:vertical .increment-button, .scroll-bar:vertical .decrement-button {
+            -fx-padding: 0; -fx-background-color: transparent;
+        }
+        .scroll-bar .increment-arrow, .scroll-bar .decrement-arrow { -fx-shape: ""; -fx-padding: 0; }
+    """;
+
+    private String encodeCss(String css) {
+        return css.replace("\n", "%0A")
+                .replace(" ", "%20")
+                .replace("#", "%23")
+                .replace("{", "%7B")
+                .replace("}", "%7D")
+                .replace(";", "%3B")
+                .replace(":", "%3A")
+                .replace(",", "%2C")
+                .replace("\"", "%22");
     }
 
     public static void main(String[] args) {

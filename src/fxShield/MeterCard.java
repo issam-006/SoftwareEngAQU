@@ -17,12 +17,12 @@ public final class MeterCard {
     private static final DecimalFormat DF = new DecimalFormat("0.0");
 
     private static final String CARD_STYLE =
-            "-fx-background-color: rgba(17,13,34,0.55);" +
+            "-fx-background-color: linear-gradient(to bottom right, rgba(23, 18, 48, 0.65), rgba(13, 10, 28, 0.85));" +
                     "-fx-background-radius: 28;" +
                     "-fx-border-radius: 28;" +
-                    "-fx-border-color: rgba(255,255,255,0.10);" +
-                    "-fx-border-width: 1;" +
-                    "-fx-effect: dropshadow(gaussian, rgba(157,110,255,0.28), 25, 0.25, 0, 0);";
+                    "-fx-border-color: rgba(255,255,255,0.14);" +
+                    "-fx-border-width: 1.2;" +
+                    "-fx-effect: dropshadow(gaussian, rgba(130, 80, 255, 0.22), 20, 0, 0, 4);";
 
     private static final String BAR_BG_STYLE =
             "-fx-control-inner-background: rgba(255,255,255,0.08);";
@@ -42,6 +42,9 @@ public final class MeterCard {
         titleLabel.setTextFill(Color.web("#e9d8ff"));
         titleLabel.setFont(Font.font("Segoe UI", 20));
         titleLabel.setStyle("-fx-font-weight: bold;");
+        titleLabel.setMinWidth(0);
+        titleLabel.setMaxWidth(Double.MAX_VALUE);
+        titleLabel.setAlignment(Pos.CENTER);
 
         // Value
         valueLabel = new Label("Loading...");
@@ -65,9 +68,9 @@ public final class MeterCard {
         root.setPadding(new Insets(22));
         root.setStyle(CARD_STYLE);
         root.setMinHeight(240);
-        root.setMinWidth(260);
-        root.setPrefWidth(0);
-        root.setMaxWidth(Double.MAX_VALUE);
+        root.setMinWidth(280);
+        root.setPrefWidth(320);
+        root.setMaxWidth(520);
 
         // Wrap extra text within card width
         extraLabel.maxWidthProperty().bind(root.widthProperty().subtract(32));
@@ -107,6 +110,26 @@ public final class MeterCard {
     public Label getValueLabel() { return valueLabel; }
     public Label getExtraLabel() { return extraLabel; }
     public ProgressBar getBar() { return bar; }
+
+    public void setCompact(boolean compact) {
+        if (compact) {
+            titleLabel.setFont(Font.font("Segoe UI", 16));
+            valueLabel.setFont(Font.font("Segoe UI", 15));
+            extraLabel.setFont(Font.font("Segoe UI", 11));
+            root.setPadding(new Insets(12));
+            root.setSpacing(8);
+            root.setMinWidth(200);
+            root.setMinHeight(180);
+        } else {
+            titleLabel.setFont(Font.font("Segoe UI", 20));
+            valueLabel.setFont(Font.font("Segoe UI", 18));
+            extraLabel.setFont(Font.font("Segoe UI", 13));
+            root.setPadding(new Insets(22));
+            root.setSpacing(14);
+            root.setMinWidth(280);
+            root.setMinHeight(240);
+        }
+    }
 
     public void setTitleText(String title) { titleLabel.setText(title); }
 

@@ -1,5 +1,6 @@
 package fxShield;
 
+import javafx.geometry.HPos;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -42,8 +43,8 @@ public final class PhysicalDiskCard {
     private final StackPane root;
     private final VBox content;
 
-    // Header as StackPane: title centered, switcher fixed left
-    private StackPane headerRow;
+    // Header: title centered, switcher on the left
+    private Pane headerRow;
 
     private final Label titleLabel;
     private final Label usedValueLabel;
@@ -53,7 +54,12 @@ public final class PhysicalDiskCard {
     private final ProgressBar usedBar;
     private final ProgressBar activeBar;
 
+    private final ColumnConstraints col0;
+    private final ColumnConstraints col1;
+    private final ColumnConstraints col2;
+
     private Node switcherNode = null;
+    private boolean isCompact = false;
 
     private String typeOverride = null;
 
@@ -67,14 +73,32 @@ public final class PhysicalDiskCard {
         titleLabel.setFont(Font.font("Segoe UI", 20));
         titleLabel.setStyle("-fx-font-weight: bold;");
         titleLabel.setAlignment(Pos.CENTER);
+        titleLabel.setMinWidth(0);
+        titleLabel.setMaxWidth(Double.MAX_VALUE);
 
-        // ===== Header (StackPane) =====
-        headerRow = new StackPane();
-        headerRow.setMinHeight(36);
-        headerRow.setPadding(new Insets(0, 6, 0, 6));
+        // ===== Header (GridPane) =====
+        GridPane headerGrid = new GridPane();
+        headerGrid.setMinHeight(36);
+        headerGrid.setPadding(new Insets(0, 4, 0, 4));
 
-        StackPane.setAlignment(titleLabel, Pos.CENTER);
-        headerRow.getChildren().add(titleLabel);
+        this.col0 = new ColumnConstraints();
+        col0.setPrefWidth(0); // Start at 0
+        col0.setMinWidth(0);
+        col0.setHalignment(HPos.LEFT);
+
+        this.col1 = new ColumnConstraints();
+        col1.setHgrow(Priority.ALWAYS);
+        col1.setHalignment(HPos.CENTER);
+        col1.setMinWidth(0);
+
+        this.col2 = new ColumnConstraints();
+        col2.setPrefWidth(0); // Start at 0
+        col2.setMinWidth(0);
+
+        headerGrid.getColumnConstraints().addAll(col0, col1, col2);
+        headerGrid.add(titleLabel, 1, 0);
+
+        headerRow = headerGrid;
 
         // ===== Used =====
         usedValueLabel = new Label("Used: Loading...");
@@ -112,9 +136,9 @@ public final class PhysicalDiskCard {
         content.setStyle(CARD_STYLE);
 
         content.setMinHeight(240);
-        content.setMinWidth(260);
-        content.setPrefWidth(0);
-        content.setMaxWidth(Double.MAX_VALUE);
+        content.setMinWidth(280);
+        content.setPrefWidth(320);
+        content.setMaxWidth(520);
 
         content.getChildren().addAll(
                 headerRow,
@@ -126,7 +150,9 @@ public final class PhysicalDiskCard {
         );
 
         root = new StackPane(content);
-        root.setMaxWidth(Double.MAX_VALUE);
+        root.setMaxWidth(520);
+        root.setMinWidth(280);
+        root.setPrefWidth(320);
     }
 
     /**
@@ -134,24 +160,26 @@ public final class PhysicalDiskCard {
      * سيظهر على يسار الهيدر، بينما العنوان يبقى بالمنتصف.
      */
     public void setSwitcherNode(Node node) {
-        if (headerRow == null) return;
+        if (headerRow == null || !(headerRow instanceof GridPane grid)) return;
 
         if (switcherNode != null) {
-            headerRow.getChildren().remove(switcherNode);
+            grid.getChildren().remove(switcherNode);
         }
 
         switcherNode = node;
+
+        double w = (switcherNode != null) ? (isCompact ? 62 : 85) : 0;
+        col0.setPrefWidth(w);
+        col0.setMinWidth(w > 0 ? Region.USE_PREF_SIZE : 0);
+        col2.setPrefWidth(w);
+        col2.setMinWidth(w > 0 ? Region.USE_PREF_SIZE : 0);
 
         if (switcherNode != null) {
             if (switcherNode instanceof Region r) {
                 r.setMaxWidth(Region.USE_PREF_SIZE);
                 r.setMaxHeight(Region.USE_PREF_SIZE);
             }
-
-            StackPane.setAlignment(switcherNode, Pos.CENTER_LEFT);
-            StackPane.setMargin(switcherNode, new Insets(0, 0, 0, -12));
-
-            headerRow.getChildren().add(switcherNode);
+            grid.add(switcherNode, 0, 0);
         }
     }
 
@@ -266,6 +294,51 @@ public final class PhysicalDiskCard {
     }
 
     public StackPane getRoot() { return root; }
+
+    public void setCompact(boolean compact) {
+        this.isCompact = compact;
+        if (compact) {
+            titleLabel.setFont(Font.font("Segoe UI", 15));
+            usedValueLabel.setFont(Font.font("Segoe UI", 14));
+            activeValueLabel.setFont(Font.font("Segoe UI", 14));
+            spaceLabel.setFont(Font.font("Segoe UI", 11));
+
+            double w = (switcherNode != null) ? 62 : 0;
+            col0.setPrefWidth(w);
+            col0.setMinWidth(w > 0 ? Region.USE_PREF_SIZE : 0);
+            col2.setPrefWidth(w);
+            col2.setMinWidth(w > 0 ? Region.USE_PREF_SIZE : 0);
+
+            content.setPadding(new Insets(12));
+            content.setSpacing(8);
+            content.setMinWidth(200);
+            content.setPrefWidth(240);
+            content.setMinHeight(180);
+
+            root.setMinWidth(200);
+            root.setPrefWidth(240);
+        } else {
+            titleLabel.setFont(Font.font("Segoe UI", 20));
+            usedValueLabel.setFont(Font.font("Segoe UI", 17));
+            activeValueLabel.setFont(Font.font("Segoe UI", 17));
+            spaceLabel.setFont(Font.font("Segoe UI", 13));
+
+            double w = (switcherNode != null) ? 85 : 0;
+            col0.setPrefWidth(w);
+            col0.setMinWidth(w > 0 ? Region.USE_PREF_SIZE : 0);
+            col2.setPrefWidth(w);
+            col2.setMinWidth(w > 0 ? Region.USE_PREF_SIZE : 0);
+
+            content.setPadding(new Insets(22));
+            content.setSpacing(14);
+            content.setMinWidth(280);
+            content.setPrefWidth(320);
+            content.setMinHeight(240);
+
+            root.setMinWidth(280);
+            root.setPrefWidth(320);
+        }
+    }
 
     public Label getUsedValueLabel() { return usedValueLabel; }
     public Label getSpaceLabel() { return spaceLabel; }

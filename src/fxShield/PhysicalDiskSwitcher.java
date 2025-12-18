@@ -2,6 +2,7 @@ package fxShield;
 
 import javafx.animation.FadeTransition;
 import javafx.animation.ParallelTransition;
+import javafx.animation.ScaleTransition;
 import javafx.animation.TranslateTransition;
 import javafx.application.Platform;
 import javafx.geometry.Pos;
@@ -25,6 +26,7 @@ public final class PhysicalDiskSwitcher {
 
     private final HBox root;
     private final Button pill;
+    private final HBox pillContent;
     private final ContextMenu menu;
 
     private final Label title;
@@ -38,59 +40,80 @@ public final class PhysicalDiskSwitcher {
 
     private static final String PILL =
             "-fx-background-radius: 999;" +
-                    "-fx-padding: 6 14;" +
-                    "-fx-background-color: rgba(255,255,255,0.10);" +
-                    "-fx-border-color: rgba(255,255,255,0.18);" +
-                    "-fx-border-width: 1;" +
+                    "-fx-padding: 6 12;" +
+                    "-fx-background-color: rgba(59,130,246,0.12);" +
+                    "-fx-border-color: rgba(59,130,246,0.25);" +
+                    "-fx-border-width: 1.5;" +
                     "-fx-border-radius: 999;";
 
     private static final String PILL_HOVER =
             "-fx-background-radius: 999;" +
-                    "-fx-padding: 6 14;" +
-                    "-fx-background-color: rgba(255,255,255,0.16);" +
-                    "-fx-border-color: rgba(255,255,255,0.28);" +
-                    "-fx-border-width: 1;" +
-                    "-fx-border-radius: 999;";
+                    "-fx-padding: 6 12;" +
+                    "-fx-background-color: rgba(59,130,246,0.18);" +
+                    "-fx-border-color: rgba(59,130,246,0.40);" +
+                    "-fx-border-width: 1.5;" +
+                    "-fx-border-radius: 999;" +
+                    "-fx-effect: dropshadow(gaussian, rgba(59,130,246,0.25), 8, 0.3, 0, 0);";
 
     private static final String MENU_CARD =
-            "-fx-background-color: rgba(36,36,48,0.92);" +
-                    "-fx-background-insets: 0;" +
-                    "-fx-background-radius: 22;" +
-                    "-fx-padding: 10;" +
-                    "-fx-border-color: rgba(255,255,255,0.12);" +
+            "-fx-background-color: rgba(15, 23, 42, 0.96);" +
+                    "-fx-background-radius: 16;" +
+                    "-fx-padding: 6;" +
+                    "-fx-border-color: rgba(255, 255, 255, 0.08);" +
                     "-fx-border-width: 1;" +
-                    "-fx-border-radius: 22;" +
-                    "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.55), 28, 0.35, 0, 16);";
+                    "-fx-border-radius: 16;" +
+                    "-fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.5), 20, 0, 0, 10);";
 
     private static final String MENU_CARD_STRONG =
             MENU_CARD +
                     "-fx-background-insets: 0;" +
-                    "-fx-padding: 10;";
+                    "-fx-padding: 6;";
 
     private static final String TRANSPARENT_OVERRIDE =
             "-fx-background-color: transparent;" +
                     "-fx-background-insets: 0;" +
-                    "-fx-padding: 0;";
+                    "-fx-padding: 0;" +
+                    "-fx-border-width: 0;" +
+                    "-fx-border-color: transparent;";
 
     private static final String ROW_NORMAL =
             "-fx-background-color: transparent;" +
-                    "-fx-background-radius: 16;" +
-                    "-fx-padding: 10 14;";
+                    "-fx-background-radius: 10;" +
+                    "-fx-padding: 8 12;" +
+                    "-fx-cursor: hand;" +
+                    "-fx-border-color: transparent;" +
+                    "-fx-border-width: 2;" +
+                    "-fx-border-radius: 10;";
 
     private static final String ROW_HOVER =
-            "-fx-background-color: rgba(147,197,253,0.14);" +
-                    "-fx-background-radius: 16;" +
-                    "-fx-padding: 10 14;";
+            "-fx-background-color: rgba(255, 255, 255, 0.12);" +
+                    "-fx-background-radius: 10;" +
+                    "-fx-padding: 8 12;" +
+                    "-fx-cursor: hand;" +
+                    "-fx-border-color: rgba(255, 255, 255, 0.15);" +
+                    "-fx-border-width: 2;" +
+                    "-fx-border-radius: 10;" +
+                    "-fx-effect: dropshadow(gaussian, rgba(59, 130, 246, 0.4), 10, 0, 0, 0);";
 
     private static final String ROW_SELECTED =
-            "-fx-background-color: linear-gradient(to right, rgba(147,197,253,0.55), rgba(167,139,250,0.55));" +
-                    "-fx-background-radius: 16;" +
-                    "-fx-padding: 10 14;";
+            "-fx-background-color: linear-gradient(to right, rgba(59, 130, 246, 0.5), rgba(99, 102, 241, 0.5));" +
+                    "-fx-background-radius: 10;" +
+                    "-fx-padding: 8 12;" +
+                    "-fx-border-color: rgba(59, 130, 246, 0.8);" +
+                    "-fx-border-width: 2;" +
+                    "-fx-border-radius: 10;" +
+                    "-fx-cursor: hand;" +
+                    "-fx-effect: dropshadow(gaussian, rgba(59, 130, 246, 0.3), 15, 0, 0, 0);";
 
     private static final String TXT =
-            "-fx-text-fill: rgba(233,216,255,0.95);" +
+            "-fx-text-fill: rgba(226, 232, 240, 1);" +
                     "-fx-font-size: 13;" +
-                    "-fx-font-weight: 600;";
+                    "-fx-font-weight: 500;";
+
+    private static final String CHECK_MARK =
+            "-fx-text-fill: #3b82f6;" +
+                    "-fx-font-size: 15;" +
+                    "-fx-font-weight: 900;";
 
     /* ================================================= */
 
@@ -102,13 +125,13 @@ public final class PhysicalDiskSwitcher {
         // ===== UI labels =====
         title = new Label("Disks");
         title.setFont(Font.font("Segoe UI", 13));
-        title.setStyle("-fx-text-fill: white; -fx-font-weight: 700;");
+        title.setStyle("-fx-text-fill: rgba(240,248,255,1); -fx-font-weight: 600;");
 
         arrow = new Label("▾");
         arrow.setFont(Font.font("Segoe UI", 12));
-        arrow.setStyle("-fx-text-fill: rgba(255,255,255,0.8);");
+        arrow.setStyle("-fx-text-fill: rgba(59,130,246,0.8); -fx-font-weight: 600;");
 
-        HBox pillContent = new HBox(8, title, arrow);
+        pillContent = new HBox(8, title, arrow);
         pillContent.setAlignment(Pos.CENTER);
 
         // ===== Menu must be created BEFORE hover handlers that reference it =====
@@ -127,6 +150,19 @@ public final class PhysicalDiskSwitcher {
             if (!menu.isShowing()) pill.setStyle(PILL);
         });
 
+        pill.setOnMousePressed(e -> {
+            ScaleTransition st = new ScaleTransition(Duration.millis(60), pill);
+            st.setToX(0.96);
+            st.setToY(0.96);
+            st.play();
+        });
+        pill.setOnMouseReleased(e -> {
+            ScaleTransition st = new ScaleTransition(Duration.millis(80), pill);
+            st.setToX(1.0);
+            st.setToY(1.0);
+            st.play();
+        });
+
         // ===== Menu show/hide styles =====
         menu.setOnShowing(e -> {
             arrow.setText("▴");
@@ -135,35 +171,11 @@ public final class PhysicalDiskSwitcher {
 
         menu.setOnShown(e -> Platform.runLater(() -> {
             Node skin = (menu.getSkin() != null) ? menu.getSkin().getNode() : null;
-            if (skin == null) return;
-
-            // 1) Apply card style to skin
-            skin.setStyle(MENU_CARD_STRONG);
-
-            // 2) Force inner layers transparent (kills white rectangles on many JavaFX skins)
-            for (Node n : skin.lookupAll(
-                    ".root, .popup-container, .context-menu, .menu, .menu-item, .menu-item-container," +
-                            ".scroll-pane, .viewport, .content, .corner, .list-view"
-            )) {
-                n.setStyle(TRANSPARENT_OVERRIDE);
+            if (skin == null) {
+                Platform.runLater(() -> applySkinStyles(menu));
+                return;
             }
-
-            // 3) Re-apply card style after forcing transparency
-            skin.setStyle(MENU_CARD_STRONG);
-
-            // animation (NO {{ }} because FadeTransition/TranslateTransition can be final)
-            skin.setOpacity(0);
-            skin.setTranslateY(-8);
-
-            FadeTransition ft = new FadeTransition(Duration.millis(140), skin);
-            ft.setFromValue(0);
-            ft.setToValue(1);
-
-            TranslateTransition tt = new TranslateTransition(Duration.millis(160), skin);
-            tt.setFromY(-8);
-            tt.setToY(0);
-
-            new ParallelTransition(ft, tt).play();
+            applySkinStyles(menu);
         }));
 
         menu.setOnHidden(e -> {
@@ -207,7 +219,52 @@ public final class PhysicalDiskSwitcher {
         rebuildMenu();
     }
 
+    private void applySkinStyles(ContextMenu menu) {
+        Node skin = (menu.getSkin() != null) ? menu.getSkin().getNode() : null;
+        if (skin == null) return;
+
+        try {
+            // 1) Set menu style here as well to ensure it's applied to the skin
+            skin.setStyle(MENU_CARD);
+
+            // 2) Force inner layers transparent (kills white rectangles on many JavaFX skins)
+            for (Node n : skin.lookupAll(
+                    ".root, .popup-container, .context-menu, .menu, .menu-item, .menu-item-container," +
+                            ".scroll-pane, .viewport, .content, .corner, .list-view, .context-menu-container, .label, .custom-menu-item"
+            )) {
+                try {
+                    n.setStyle(TRANSPARENT_OVERRIDE);
+                } catch (RuntimeException ignored) {}
+            }
+        } catch (RuntimeException ignored) {}
+
+        // animation
+        skin.setOpacity(0);
+        skin.setTranslateY(-10);
+        skin.setScaleX(0.97);
+        skin.setScaleY(0.97);
+
+        FadeTransition ft = new FadeTransition(Duration.millis(120), skin);
+        ft.setFromValue(0);
+        ft.setToValue(1);
+
+        TranslateTransition tt = new TranslateTransition(Duration.millis(150), skin);
+        tt.setFromY(-10);
+        tt.setToY(0);
+
+        ScaleTransition st = new ScaleTransition(Duration.millis(150), skin);
+        st.setFromX(0.97);
+        st.setFromY(0.97);
+        st.setToX(1.0);
+        st.setToY(1.0);
+
+        new ParallelTransition(ft, tt, st).play();
+    }
+
     private void rebuildMenu() {
+        if (menu.getScene() != null) menu.getScene().setFill(null);
+        menu.setStyle(MENU_CARD);
+
         menu.getItems().clear();
 
         if (count <= 0) {
@@ -222,23 +279,74 @@ public final class PhysicalDiskSwitcher {
 
             Label txt = new Label("Disk " + idx);
             txt.setStyle(TXT);
+            txt.setMouseTransparent(true);
+            txt.setFocusTraversable(false);
 
-            Label check = new Label(idx == selected ? "✓" : "");
-            check.setStyle("-fx-text-fill: white; -fx-font-weight: 900;");
+            Label check = new Label("✓");
+            check.setStyle(CHECK_MARK);
+            check.setOpacity(idx == selected ? 1.0 : 0.0);
+            check.setMouseTransparent(true);
+            check.setFocusTraversable(false);
 
             Region spacer = new Region();
             HBox.setHgrow(spacer, Priority.ALWAYS);
+            spacer.setMouseTransparent(true);
 
             HBox row = new HBox(10, txt, spacer, check);
             row.setAlignment(Pos.CENTER_LEFT);
-            row.setMinWidth(240);
+            row.setMinWidth(220);
+            row.setMaxWidth(Double.MAX_VALUE);
             row.setStyle(idx == selected ? ROW_SELECTED : ROW_NORMAL);
-
-            row.setOnMouseEntered(e -> row.setStyle(idx == selected ? ROW_SELECTED : ROW_HOVER));
-            row.setOnMouseExited(e -> row.setStyle(idx == selected ? ROW_SELECTED : ROW_NORMAL));
+            row.setPickOnBounds(true);
 
             CustomMenuItem item = new CustomMenuItem(row, true);
+            item.getStyleClass().add("custom-menu-item");
+            item.setHideOnClick(true);
+
+            // Hover effect with smooth animation (no selection change)
+            row.setOnMouseEntered(e -> {
+                // Apply hover style only if not already selected
+                if (idx != selected) {
+                    row.setStyle(ROW_HOVER);
+                    check.setOpacity(0.4);
+                }
+
+                // Smooth scale animation on hover
+                ScaleTransition st2 = new ScaleTransition(Duration.millis(100), row);
+                st2.setToX(1.02);
+                st2.setToY(1.02);
+                st2.play();
+            });
+
+            row.setOnMouseExited(e -> {
+                // Return to normal style if not selected
+                if (idx != selected) {
+                    row.setStyle(ROW_NORMAL);
+                    check.setOpacity(0.0);
+                }
+
+                // Return to normal scale
+                ScaleTransition st2 = new ScaleTransition(Duration.millis(100), row);
+                st2.setToX(1.0);
+                st2.setToY(1.0);
+                st2.play();
+            });
+
+            row.setOnMousePressed(e -> {
+                ScaleTransition st2 = new ScaleTransition(Duration.millis(50), row);
+                st2.setToX(0.98);
+                st2.setToY(0.98);
+                st2.play();
+            });
+            row.setOnMouseReleased(e -> {
+                ScaleTransition st2 = new ScaleTransition(Duration.millis(50), row);
+                st2.setToX(1.0);
+                st2.setToY(1.0);
+                st2.play();
+            });
+
             item.setOnAction(e -> {
+                // Selection happens on click
                 setSelectedIndex(idx);
                 menu.hide();
             });
@@ -283,12 +391,40 @@ public final class PhysicalDiskSwitcher {
     public void setCount(int c) {
         count = Math.max(0, c);
         selected = 0; // Disk 0 default
+
         refresh();
     }
 
     public void setSelectedIndex(int idx) {
         selected = clamp(idx, 0, count - 1);
         refresh();
+    }
+
+    public void setCompact(boolean compact) {
+        if (compact) {
+            pill.setStyle(PILL + "-fx-padding: 3 8; -fx-border-width: 1;");
+            title.setFont(Font.font("Segoe UI", 11));
+            arrow.setFont(Font.font("Segoe UI", 10));
+            pillContent.setSpacing(4);
+            title.setVisible(true);
+            title.setManaged(true);
+        } else {
+            pill.setStyle(PILL);
+            title.setFont(Font.font("Segoe UI", 13));
+            arrow.setFont(Font.font("Segoe UI", 12));
+            pillContent.setSpacing(8);
+            title.setVisible(true);
+            title.setManaged(true);
+        }
+    }
+
+    public void setVeryCompact(boolean veryCompact) {
+        setCompact(veryCompact);
+        if (veryCompact) {
+            title.setVisible(false);
+            title.setManaged(false);
+            pill.setStyle(PILL + "-fx-padding: 3 6; -fx-border-width: 1;");
+        }
     }
 
     public int getSelectedIndex() { return selected; }

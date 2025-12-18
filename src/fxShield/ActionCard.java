@@ -40,10 +40,10 @@ public final class ActionCard {
 
     // Card styles
     private static final String CARD_BASE =
-            "-fx-background-color: rgba(7,7,20,0.65);" +
+            "-fx-background-color: linear-gradient(to bottom right, rgba(15, 15, 35, 0.7), rgba(5, 5, 15, 0.85));" +
                     "-fx-background-radius: 22;" +
                     "-fx-border-radius: 22;" +
-                    "-fx-border-width: 1;";
+                    "-fx-border-width: 1.2;";
 
     private static final String CARD_NORMAL =
             CARD_BASE +
@@ -106,6 +106,8 @@ public final class ActionCard {
         root.setAlignment(Pos.CENTER_LEFT);
         root.setPadding(new Insets(26));
         root.setMinHeight(110);
+        root.setMinWidth(300);
+        root.setMaxWidth(650);
         root.setStyle(CARD_NORMAL);
         root.setAccessibleText(title);
 

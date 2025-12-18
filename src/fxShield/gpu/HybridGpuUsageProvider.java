@@ -58,6 +58,9 @@ public final class HybridGpuUsageProvider implements GpuUsageProvider {
         try { if (nvml != null) nvml.close(); } catch (Exception ignored) {}
         try { if (pdh != null) pdh.close(); } catch (Exception ignored) {}
         try { if (typeperf != null) typeperf.close(); } catch (Exception ignored) {}
+        nvml = null;
+        pdh = null;
+        typeperf = null;
         active = null;
     }
 }
