@@ -1,4 +1,3 @@
-
 package fxShield;
 
 import javafx.application.Platform;
@@ -12,7 +11,11 @@ import javafx.scene.text.Font;
 
 import java.text.DecimalFormat;
 
-public final class MeterCard {
+/**
+ * A card component that displays a metric with a progress bar.
+ * Extends BaseCard for common styling and utility methods.
+ */
+public final class MeterCard extends BaseCard {
 
     private static final DecimalFormat DF = new DecimalFormat("0.0");
 
@@ -24,12 +27,6 @@ public final class MeterCard {
                     "-fx-border-width: 1.2;" +
                     "-fx-effect: dropshadow(gaussian, rgba(130, 80, 255, 0.22), 20, 0, 0, 4);";
 
-    private static final String BAR_BG_STYLE =
-            "-fx-control-inner-background: rgba(255,255,255,0.08);";
-    private static final String ACCENT_DEFAULT = "#a78bfa";
-    private static final String ACCENT_WARN = "#fb923c";
-    private static final String ACCENT_DANGER = "#f97373";
-
     private final VBox root;
     private final Label titleLabel;
     private final Label valueLabel;
@@ -39,8 +36,8 @@ public final class MeterCard {
     public MeterCard(String titleText) {
         // Title
         titleLabel = new Label(titleText);
-        titleLabel.setTextFill(Color.web("#e9d8ff"));
-        titleLabel.setFont(Font.font("Segoe UI", 20));
+        titleLabel.setTextFill(colorFromHex(COLOR_TEXT_MEDIUM));
+        titleLabel.setFont(Font.font(FONT_FAMILY, 20));
         titleLabel.setStyle("-fx-font-weight: bold;");
         titleLabel.setMinWidth(0);
         titleLabel.setMaxWidth(Double.MAX_VALUE);
@@ -48,19 +45,19 @@ public final class MeterCard {
 
         // Value
         valueLabel = new Label("Loading...");
-        valueLabel.setTextFill(Color.web("#f5e8ff"));
-        valueLabel.setFont(Font.font("Segoe UI", 18));
+        valueLabel.setTextFill(colorFromHex(COLOR_TEXT_LIGHT));
+        valueLabel.setFont(Font.font(FONT_FAMILY, 18));
 
         // Extra
         extraLabel = new Label("Waiting for first sample...");
-        extraLabel.setTextFill(Color.web("#cbb8ff"));
-        extraLabel.setFont(Font.font("Segoe UI", 13));
+        extraLabel.setTextFill(colorFromHex(COLOR_TEXT_DIM));
+        extraLabel.setFont(Font.font(FONT_FAMILY, 13));
         extraLabel.setWrapText(true);
 
         // Bar
         bar = new ProgressBar(0);
         bar.setPrefWidth(260);
-        setBarAccentColor(ACCENT_DEFAULT);
+        setBarAccentColor(bar, COLOR_PRIMARY);
 
         // Card
         root = new VBox(14);
@@ -105,26 +102,29 @@ public final class MeterCard {
         setUnavailable(null);
     }
 
+    @Override
     public VBox getRoot() { return root; }
+    
     public Label getTitleLabel() { return titleLabel; }
     public Label getValueLabel() { return valueLabel; }
     public Label getExtraLabel() { return extraLabel; }
     public ProgressBar getBar() { return bar; }
 
+    @Override
     public void setCompact(boolean compact) {
         if (compact) {
-            titleLabel.setFont(Font.font("Segoe UI", 16));
-            valueLabel.setFont(Font.font("Segoe UI", 15));
-            extraLabel.setFont(Font.font("Segoe UI", 11));
+            titleLabel.setFont(Font.font(FONT_FAMILY, 16));
+            valueLabel.setFont(Font.font(FONT_FAMILY, 15));
+            extraLabel.setFont(Font.font(FONT_FAMILY, 11));
             root.setPadding(new Insets(12));
             root.setSpacing(8);
             root.setMinWidth(200);
             root.setPrefWidth(240);
             root.setMinHeight(180);
         } else {
-            titleLabel.setFont(Font.font("Segoe UI", 20));
-            valueLabel.setFont(Font.font("Segoe UI", 18));
-            extraLabel.setFont(Font.font("Segoe UI", 13));
+            titleLabel.setFont(Font.font(FONT_FAMILY, 20));
+            valueLabel.setFont(Font.font(FONT_FAMILY, 18));
+            extraLabel.setFont(Font.font(FONT_FAMILY, 13));
             root.setPadding(new Insets(22));
             root.setSpacing(14);
             root.setMinWidth(280);
@@ -136,26 +136,13 @@ public final class MeterCard {
     public void setTitleText(String title) { titleLabel.setText(title); }
 
     private void applyColorByUsage(double percent) {
-        String color = ACCENT_DEFAULT;
-        if (percent >= 85) color = ACCENT_DANGER;
-        else if (percent >= 60) color = ACCENT_WARN;
-
-        valueLabel.setTextFill(Color.web(color));
-        setBarAccentColor(color);
+        String color = getColorByUsage(percent);
+        valueLabel.setTextFill(colorFromHex(color));
+        setBarAccentColor(bar, color);
     }
 
     private void applyUnavailableStyle() {
-        valueLabel.setTextFill(Color.web("#cbb8ff"));
-        setBarAccentColor(ACCENT_DEFAULT);
-    }
-
-    private void setBarAccentColor(String color) {
-        bar.setStyle(BAR_BG_STYLE + "-fx-accent: " + color + ";");
-    }
-
-    private static double clamp(double v, double min, double max) {
-        if (v < min) return min;
-        if (v > max) return max;
-        return v;
+        valueLabel.setTextFill(colorFromHex(COLOR_TEXT_DIM));
+        setBarAccentColor(bar, COLOR_PRIMARY);
     }
 }

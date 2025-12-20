@@ -9,13 +9,17 @@ import javafx.scene.control.Button;
 import javafx.scene.control.Label;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
-import javafx.scene.paint.Color;
 import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
 import javafx.util.Duration;
 
-public final class ActionCard {
+/**
+ * A card component that displays an action with icon, title, description, and button.
+ * Extends BaseCard for common styling and utility methods.
+ */
+public final class ActionCard extends BaseCard {
 
     private static final Duration HOVER_DURATION = Duration.millis(140);
 
@@ -69,20 +73,20 @@ public final class ActionCard {
         // Icon
         iconShape = new SVGPath();
         iconShape.setContent(svgPath);
-        iconShape.setFill(Color.web("#cbd5e1"));
+        iconShape.setFill(colorFromHex("#cbd5e1"));
         iconShape.setScaleX(iconScale);
         iconShape.setScaleY(iconScale);
 
         // Title
         titleLabel = new Label(title);
-        titleLabel.setFont(Font.font("Segoe UI", 17));
-        titleLabel.setTextFill(Color.web("#f1e8ff"));
+        titleLabel.setFont(Font.font(FONT_FAMILY, 17));
+        titleLabel.setTextFill(colorFromHex(COLOR_TEXT_LIGHT));
         titleLabel.setStyle("-fx-font-weight: bold; -fx-effect: none;");
 
         // Description
         descLabel = new Label(desc);
-        descLabel.setFont(Font.font("Segoe UI", 13));
-        descLabel.setTextFill(Color.web("#d5c8f7"));
+        descLabel.setFont(Font.font(FONT_FAMILY, 13));
+        descLabel.setTextFill(colorFromHex(COLOR_TEXT_MUTED));
         descLabel.setStyle("-fx-effect: none;");
         descLabel.setWrapText(true);
 
@@ -96,7 +100,7 @@ public final class ActionCard {
         // Button
         actionButton = new Button(buttonText);
         actionButton.setMnemonicParsing(false);
-        actionButton.setFont(Font.font("Segoe UI", 13));
+        actionButton.setFont(Font.font(FONT_FAMILY, 13));
         actionButton.setStyle(BTN_NORMAL);
         actionButton.setOnMouseEntered(e -> actionButton.setStyle(BTN_HOVER));
         actionButton.setOnMouseExited(e -> actionButton.setStyle(BTN_NORMAL));
@@ -142,7 +146,26 @@ public final class ActionCard {
     }
 
     // Accessors
+    @Override
     public HBox getRoot() { return root; }
+    
+    @Override
+    public void setCompact(boolean compact) {
+        if (compact) {
+            titleLabel.setFont(Font.font(FONT_FAMILY, 14));
+            descLabel.setFont(Font.font(FONT_FAMILY, 11));
+            actionButton.setFont(Font.font(FONT_FAMILY, 11));
+            root.setPadding(new Insets(16));
+            root.setMinHeight(80);
+        } else {
+            titleLabel.setFont(Font.font(FONT_FAMILY, 17));
+            descLabel.setFont(Font.font(FONT_FAMILY, 13));
+            actionButton.setFont(Font.font(FONT_FAMILY, 13));
+            root.setPadding(new Insets(26));
+            root.setMinHeight(110);
+        }
+    }
+    
     public Button getButton() { return actionButton; }
     public Button getActionButton() { return actionButton; }
     public Label getTitleLabel() { return titleLabel; }

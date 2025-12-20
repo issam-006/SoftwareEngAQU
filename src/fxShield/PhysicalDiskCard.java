@@ -7,7 +7,6 @@ import javafx.scene.Node;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.layout.*;
-import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 
 import java.text.DecimalFormat;
@@ -16,7 +15,11 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
-public final class PhysicalDiskCard {
+/**
+ * A card component that displays physical disk information with usage bars.
+ * Extends BaseCard for common styling and utility methods.
+ */
+public final class PhysicalDiskCard extends BaseCard {
 
     private static final Map<String, String> diskTypeCache = new ConcurrentHashMap<>();
     private static final Pattern NVME_PATTERN = Pattern.compile("\\b(nvme|nvm|pci-?e|pci express|pcie)\\b", Pattern.CASE_INSENSITIVE);
@@ -33,10 +36,6 @@ public final class PhysicalDiskCard {
                     "-fx-border-color: rgba(255,255,255,0.10);" +
                     "-fx-border-width: 1;" +
                     "-fx-effect: dropshadow(gaussian, rgba(157,110,255,0.28), 25, 0.25, 0, 0);";
-
-    private static final String BAR_BG = "-fx-control-inner-background: rgba(255,255,255,0.08);";
-    private static final String ACCENT_USED   = "#a78bfa";
-    private static final String ACCENT_ACTIVE = "#7dd3fc";
 
     private static final DecimalFormat SIZE_FORMAT = new DecimalFormat("0.0");
 
@@ -69,8 +68,8 @@ public final class PhysicalDiskCard {
 
         // ===== Title (centered) =====
         titleLabel = new Label("Disk " + index + " • " + diskType);
-        titleLabel.setTextFill(Color.web("#e9d8ff"));
-        titleLabel.setFont(Font.font("Segoe UI", 20));
+        titleLabel.setTextFill(colorFromHex(COLOR_TEXT_MEDIUM));
+        titleLabel.setFont(Font.font(FONT_FAMILY, 20));
         titleLabel.setStyle("-fx-font-weight: bold;");
         titleLabel.setAlignment(Pos.CENTER);
         titleLabel.setMinWidth(0);
@@ -104,30 +103,30 @@ public final class PhysicalDiskCard {
         usedValueLabel = new Label("Used: Loading...");
         usedValueLabel.setAlignment(Pos.CENTER);
         usedValueLabel.setMaxWidth(Double.MAX_VALUE);
-        usedValueLabel.setTextFill(Color.web("#f5e8ff"));
-        usedValueLabel.setFont(Font.font("Segoe UI", 17));
+        usedValueLabel.setTextFill(colorFromHex(COLOR_TEXT_LIGHT));
+        usedValueLabel.setFont(Font.font(FONT_FAMILY, 17));
 
         usedBar = new ProgressBar(0);
         makeBarFullWidth(usedBar);
-        setBarAccent(usedBar, ACCENT_USED);
+        setBarAccentColor(usedBar, COLOR_PRIMARY);
 
         // ===== Space =====
         spaceLabel = new Label("Size: " + SIZE_FORMAT.format(sizeGb) + " GB");
         spaceLabel.setAlignment(Pos.CENTER);
         spaceLabel.setMaxWidth(Double.MAX_VALUE);
-        spaceLabel.setTextFill(Color.web("#c5b3ff"));
-        spaceLabel.setFont(Font.font("Segoe UI", 13));
+        spaceLabel.setTextFill(colorFromHex(COLOR_TEXT_DIM));
+        spaceLabel.setFont(Font.font(FONT_FAMILY, 13));
 
         // ===== Active =====
         activeValueLabel = new Label("Active: 0 %");
         activeValueLabel.setAlignment(Pos.CENTER);
         activeValueLabel.setMaxWidth(Double.MAX_VALUE);
-        activeValueLabel.setTextFill(Color.web("#f5e8ff"));
-        activeValueLabel.setFont(Font.font("Segoe UI", 17));
+        activeValueLabel.setTextFill(colorFromHex(COLOR_TEXT_LIGHT));
+        activeValueLabel.setFont(Font.font(FONT_FAMILY, 17));
 
         activeBar = new ProgressBar(0);
         makeBarFullWidth(activeBar);
-        setBarAccent(activeBar, ACCENT_ACTIVE);
+        setBarAccentColor(activeBar, COLOR_INFO);
 
         // ===== Content =====
         content = new VBox(14);
@@ -278,24 +277,16 @@ public final class PhysicalDiskCard {
         activeBar.setProgress(clamp01(snap.activePercent / 100.0));
     }
 
-    private static void setBarAccent(ProgressBar bar, String accentHex) {
-        bar.setStyle(BAR_BG + "-fx-accent: " + accentHex + ";");
-    }
-
     private static void makeBarFullWidth(ProgressBar bar) {
         bar.setMaxWidth(Double.MAX_VALUE);
         bar.setPrefWidth(Double.MAX_VALUE);
         VBox.setVgrow(bar, Priority.NEVER);
     }
 
-    private static double clamp01(double v) {
-        if (v < 0) return 0;
-        if (v > 1) return 1;
-        return v;
-    }
-
+    @Override
     public StackPane getRoot() { return root; }
 
+    @Override
     public void setCompact(boolean compact) {
         this.isCompact = compact;
         if (compact) {

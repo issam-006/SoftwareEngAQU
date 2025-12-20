@@ -577,9 +577,22 @@ public final class DeviceInfoDialog {
             info.cpuModel = safe(id.getModel());
             info.cpuStepping = safe(id.getStepping());
 
-            info.l1Cache = reflectLong(cpu, "getCacheL1", -1);
-            info.l2Cache = reflectLong(cpu, "getCacheL2", -1);
-            info.l3Cache = reflectLong(cpu, "getCacheL3", -1);
+            // Get CPU cache sizes from OSHI's ProcessorCaches
+            try {
+                List<CentralProcessor.ProcessorCache> caches = cpu.getProcessorCaches();
+                for (CentralProcessor.ProcessorCache cache : caches) {
+                    long size = cache.getCacheSize();
+                    int level = cache.getLevel();
+                    if (level == 1 && info.l1Cache < 0) info.l1Cache = size;
+                    else if (level == 2 && info.l2Cache < 0) info.l2Cache = size;
+                    else if (level == 3 && info.l3Cache < 0) info.l3Cache = size;
+                }
+            } catch (Throwable t) {
+                // Fallback: try reflection for older OSHI versions
+                info.l1Cache = reflectLong(cpu, "getCacheL1", -1);
+                info.l2Cache = reflectLong(cpu, "getCacheL2", -1);
+                info.l3Cache = reflectLong(cpu, "getCacheL3", -1);
+            }
 
             Double load = reflectDouble(cpu, "getSystemCpuLoadBetweenTicks", null);
             if (load == null) load = reflectDouble(cpu, "getSystemCpuLoad", null);
@@ -681,62 +694,100 @@ public final class DeviceInfoDialog {
                 }
             } catch (Throwable ignored) {}
 
-            // Battery (compatible)
+            // Battery - using direct OSHI PowerSource API
             try {
-                Object psObj = null;
-                try { psObj = hal.getClass().getMethod("getPowerSources").invoke(hal); }
-                catch (Throwable ignored) {}
-
-                List<Object> psList = new ArrayList<>();
-                if (psObj instanceof List<?> l) {
-                    for (Object o : l) psList.add(o);
-                } else if (psObj != null && psObj.getClass().isArray()) {
-                    int n = java.lang.reflect.Array.getLength(psObj);
-                    for (int i = 0; i < n; i++) psList.add(java.lang.reflect.Array.get(psObj, i));
-                }
-
-                for (Object p : psList) {
+                List<PowerSource> powerSources = hal.getPowerSources();
+                for (PowerSource ps : powerSources) {
                     BatterySpec bs = new BatterySpec();
-                    bs.name = safe(reflectString(p, "getName", "Battery"));
-
-                    Double rem = reflectDouble(p, "getRemainingCapacity", null);
-                    if (rem == null) rem = reflectDouble(p, "getRemainingCapacityPercent", null);
-                    if (rem == null) rem = reflectDouble(p, "getRemainingCapacityPercentage", null);
-
-                    if (rem == null) bs.remaining = "N/A";
-                    else {
-                        double r = rem;
-                        if (r <= 1.0) r *= 100.0;
-                        bs.remaining = PCT_1D.format(r) + " %";
+                    bs.name = safe(ps.getName());
+                    
+                    // Get remaining capacity (returns 0.0-1.0)
+                    double rem = ps.getRemainingCapacityPercent();
+                    if (rem >= 0 && rem <= 1.0) {
+                        bs.remaining = PCT_1D.format(rem * 100.0) + " %";
+                    } else {
+                        bs.remaining = "N/A";
                     }
-
-                    Boolean charging = reflectBoolean(p, "isCharging", null);
-                    bs.state = (charging != null && charging) ? "Charging" : "Discharging";
-
-                    Double sec = reflectDouble(p, "getTimeRemainingEstimated", null);
-                    if (sec == null) sec = reflectDouble(p, "getTimeRemaining", null);
-                    bs.timeRemaining = (sec == null || sec < 0) ? "N/A" : formatUptime(sec.longValue());
-
+                    
+                    // Check charging state
+                    bs.state = ps.isCharging() ? "Charging" : "Discharging";
+                    
+                    // Get time remaining (returns seconds, -1 if unknown, -2 if unlimited/charging)
+                    double timeRemaining = ps.getTimeRemainingEstimated();
+                    if (timeRemaining >= 0) {
+                        bs.timeRemaining = formatUptime((long) timeRemaining);
+                    } else {
+                        bs.timeRemaining = ps.isCharging() ? "Charging" : "N/A";
+                    }
+                    
                     info.batteries.add(bs);
                 }
             } catch (Throwable ignored) {}
 
-            // ✅ Display (JavaFX) + Refresh best-effort from Windows
+            // Display - using OSHI Display API + JavaFX for additional info
             try {
-                String refresh = detectWindowsRefreshRate();
+                List<Display> oshiDisplays = hal.getDisplays();
                 List<Screen> screens = Screen.getScreens();
-                for (int i = 0; i < screens.size(); i++) {
-                    Screen s = screens.get(i);
-                    Rectangle2D b = s.getBounds();
-
+                
+                // Get refresh rates from Windows (one per display if possible)
+                List<String> refreshRates = detectWindowsRefreshRates();
+                
+                for (int i = 0; i < Math.max(oshiDisplays.size(), screens.size()); i++) {
                     DisplaySpec ds = new DisplaySpec();
-                    ds.name = "\\\\Display" + i;
-                    ds.resolution = ((int) b.getWidth()) + " × " + ((int) b.getHeight());
-                    ds.refresh = isNA(refresh) ? "N/A" : (refresh + " Hz");
-                    ds.scale = "x" + String.format("%.2f", s.getOutputScaleX());
-                    ds.dpi = DPI_0D.format(s.getDpi());
-
+                    
+                    // Get OSHI display info (EDID data)
+                    if (i < oshiDisplays.size()) {
+                        Display d = oshiDisplays.get(i);
+                        byte[] edid = d.getEdid();
+                        if (edid != null && edid.length >= 128) {
+                            // Parse manufacturer from EDID
+                            String manufacturer = parseEdidManufacturer(edid);
+                            ds.name = manufacturer != null ? manufacturer : ("Display " + i);
+                        } else {
+                            ds.name = "Display " + i;
+                        }
+                    } else {
+                        ds.name = "Display " + i;
+                    }
+                    
+                    // Get JavaFX screen info for resolution, scale, DPI
+                    if (i < screens.size()) {
+                        Screen s = screens.get(i);
+                        Rectangle2D b = s.getBounds();
+                        ds.resolution = ((int) b.getWidth()) + " × " + ((int) b.getHeight());
+                        ds.scale = "x" + String.format("%.2f", s.getOutputScaleX());
+                        ds.dpi = DPI_0D.format(s.getDpi());
+                    } else {
+                        ds.resolution = "N/A";
+                        ds.scale = "N/A";
+                        ds.dpi = "N/A";
+                    }
+                    
+                    // Get refresh rate
+                    if (i < refreshRates.size() && !isNA(refreshRates.get(i))) {
+                        ds.refresh = refreshRates.get(i) + " Hz";
+                    } else if (!refreshRates.isEmpty() && !isNA(refreshRates.get(0))) {
+                        ds.refresh = refreshRates.get(0) + " Hz";
+                    } else {
+                        ds.refresh = "N/A";
+                    }
+                    
                     info.displays.add(ds);
+                }
+                
+                // If no displays detected, add at least one from JavaFX
+                if (info.displays.isEmpty() && !screens.isEmpty()) {
+                    for (int i = 0; i < screens.size(); i++) {
+                        Screen s = screens.get(i);
+                        Rectangle2D b = s.getBounds();
+                        DisplaySpec ds = new DisplaySpec();
+                        ds.name = "Display " + i;
+                        ds.resolution = ((int) b.getWidth()) + " × " + ((int) b.getHeight());
+                        ds.refresh = !refreshRates.isEmpty() ? (refreshRates.get(0) + " Hz") : "N/A";
+                        ds.scale = "x" + String.format("%.2f", s.getOutputScaleX());
+                        ds.dpi = DPI_0D.format(s.getDpi());
+                        info.displays.add(ds);
+                    }
                 }
             } catch (Throwable ignored) {}
 
@@ -746,17 +797,71 @@ public final class DeviceInfoDialog {
         }
     }
 
-    private static String detectWindowsRefreshRate() {
-        // Best effort for Windows (won't break design if fails)
-        String out = runCmd("cmd", "/c", "wmic path Win32_VideoController get CurrentRefreshRate /value");
-        String v = extractAfter(out, "CurrentRefreshRate=");
-        if (!isNA(v)) return v.trim();
-
-        // fallback PowerShell
-        String ps = runCmd("powershell", "-NoProfile", "-Command",
-                "Get-CimInstance Win32_VideoController | Select-Object -First 1 -ExpandProperty CurrentRefreshRate");
-        ps = ps == null ? "" : ps.trim();
-        return ps.isBlank() ? "N/A" : ps;
+    private static List<String> detectWindowsRefreshRates() {
+        List<String> rates = new ArrayList<>();
+        try {
+            // Try PowerShell to get all display refresh rates
+            String ps = runCmd("powershell", "-NoProfile", "-Command",
+                    "Get-CimInstance Win32_VideoController | ForEach-Object { $_.CurrentRefreshRate }");
+            if (ps != null && !ps.isBlank()) {
+                for (String line : ps.split("\\R+")) {
+                    String trimmed = line.trim();
+                    if (!trimmed.isEmpty() && trimmed.matches("\\d+")) {
+                        rates.add(trimmed);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        
+        // Fallback to WMIC if PowerShell failed
+        if (rates.isEmpty()) {
+            try {
+                String out = runCmd("cmd", "/c", "wmic path Win32_VideoController get CurrentRefreshRate /value");
+                String v = extractAfter(out, "CurrentRefreshRate=");
+                if (!isNA(v)) rates.add(v.trim());
+            } catch (Throwable ignored) {}
+        }
+        
+        return rates;
+    }
+    
+    private static String parseEdidManufacturer(byte[] edid) {
+        if (edid == null || edid.length < 128) return null;
+        try {
+            // EDID manufacturer ID is at bytes 8-9 (compressed 3-letter code)
+            int manufacturerId = ((edid[8] & 0xFF) << 8) | (edid[9] & 0xFF);
+            char c1 = (char) (((manufacturerId >> 10) & 0x1F) + 'A' - 1);
+            char c2 = (char) (((manufacturerId >> 5) & 0x1F) + 'A' - 1);
+            char c3 = (char) ((manufacturerId & 0x1F) + 'A' - 1);
+            String code = "" + c1 + c2 + c3;
+            
+            // Map common manufacturer codes to names
+            return switch (code) {
+                case "SAM" -> "Samsung";
+                case "LGD", "GSM" -> "LG";
+                case "DEL" -> "Dell";
+                case "ACI" -> "ASUS";
+                case "ACR" -> "Acer";
+                case "BNQ" -> "BenQ";
+                case "AOC" -> "AOC";
+                case "HWP" -> "HP";
+                case "LEN" -> "Lenovo";
+                case "VSC" -> "ViewSonic";
+                case "PHI", "PHL" -> "Philips";
+                case "AUO" -> "AU Optronics";
+                case "CMN" -> "Chimei Innolux";
+                case "BOE" -> "BOE";
+                case "IVO" -> "InfoVision";
+                case "SDC" -> "Samsung Display";
+                case "NEC" -> "NEC";
+                case "EIZ" -> "EIZO";
+                case "APP" -> "Apple";
+                case "MSI" -> "MSI";
+                default -> code; // Return the 3-letter code if unknown
+            };
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     private static String extractAfter(String text, String key) {
