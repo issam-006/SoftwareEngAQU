@@ -31,6 +31,6 @@
     <orderEntry type="library" name="jna-5.15.0" level="project" />
     <orderEntry type="library" name="jna-platform-5.15.0" level="project" />
     <orderEntry type="library" name="oshi-core-java11-6.9.1" level="project" />
-    <orderEntry type="library" name="lib" level="project" />
+    <orderEntry type="library" name="lib" level="project" scope="PROVIDED" />
   </component>
 </module>

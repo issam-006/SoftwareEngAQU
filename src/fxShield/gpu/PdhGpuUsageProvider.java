@@ -1,4 +1,4 @@
-package fxShield.gpu;
+package fxShield.GPU;
 
 import com.sun.jna.*;
 import com.sun.jna.ptr.*;

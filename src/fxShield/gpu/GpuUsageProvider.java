@@ -1,4 +1,4 @@
-package fxShield.gpu;
+package fxShield.GPU;
 
 import java.util.OptionalInt;
 

@@ -1,4 +1,4 @@
-package fxShield.gpu;
+package fxShield.GPU;
 
 public final class HybridGpuUsageProvider implements GpuUsageProvider {
 
