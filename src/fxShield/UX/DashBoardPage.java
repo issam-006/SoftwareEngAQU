@@ -1,10 +1,14 @@
 package fxShield.UX;
 
-import fxShield.DB.*;
-import fxShield.WIN.*;
+import fxShield.DB.RemoteConfig;
+import fxShield.DB.RemoteConfigService;
 import fxShield.UI.*;
-import fxShield.GPU.*;
-import fxShield.DISK.*;
+import fxShield.WIN.AutomationService;
+import fxShield.WIN.SettingsStore;
+import fxShield.WIN.WindowsSnapFrameless;
+import fxShield.WIN.WindowsUtils;
+import fxShield.DISK.PhysicalDiskCard;
+import fxShield.DISK.PhysicalDiskSwitcher;
 
 import javafx.animation.FadeTransition;
 import javafx.animation.PauseTransition;
@@ -17,7 +21,6 @@ import javafx.scene.Scene;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.control.ScrollPane;
-import javafx.scene.input.KeyCombination;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
@@ -34,7 +37,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
-public class DashBoardPage extends Application {
+public final class DashBoardPage extends Application {
 
     private static final Pattern EAP_BAD =
             Pattern.compile("(?im)^\\s*\\$ErrorActionPreference\\s*=\\s*(SilentlyContinue|Continue|Stop|Inquire)\\s*;?\\s*$");
@@ -43,9 +46,16 @@ public class DashBoardPage extends Application {
 
     private final RemoteConfigService configService = new RemoteConfigService();
 
-    private Stage primaryStage;
-    private BorderPane root;
+    // ====== Stages ======
+    private Stage primaryStage;     // Dashboard stage
+    private Stage splashStage;      // Splash stage
 
+    // ====== Splash refs ======
+    private BorderPane splashRoot;
+    private Label splashStatus;
+
+    // ====== Dashboard refs ======
+    private BorderPane root;
     private Label appTitle;
 
     private MeterCard cpuCard;
@@ -69,7 +79,7 @@ public class DashBoardPage extends Application {
     private GridPane toolsGrid;
     private int currentCols = -1;
 
-    // ---------- Responsive (FINAL FIX) ----------
+    // ---------- Responsive ----------
     private final PauseTransition responsiveDebounce = new PauseTransition(javafx.util.Duration.millis(140));
     private double pendingWidth = -1;
 
@@ -77,7 +87,7 @@ public class DashBoardPage extends Application {
     private boolean diskVeryCompactState = false;
     private boolean responsiveInstalled = false;
 
-    // Hysteresis (تمنع toggling على micro-jitter)
+    // Hysteresis
     private static final double COMPACT_ON  = 1150;
     private static final double COMPACT_OFF = 1250;
 
@@ -88,76 +98,99 @@ public class DashBoardPage extends Application {
 
     private ScrollPane mainScroll;
 
-    // تفعيل اللوج
-    private static final boolean DEBUG_RESP = true;
+    // ================== WINDOW STYLE ==================
 
-    private static String fmtW(double v) {
-        if (v <= 0) return "-";
-        return String.valueOf(Math.rint(v));
+    private static final String ROOT_STYLE_WINDOWED =
+            "-fx-background-color: linear-gradient(to bottom, #020617, #0f172a);" +
+                    "-fx-background-radius: 24;" +
+                    "-fx-border-radius: 24;" +
+                    "-fx-border-color: rgba(147,197,253,0.30);" +
+                    "-fx-border-width: 1.2;";
+
+    private static final String ROOT_STYLE_MAXIMIZED =
+            "-fx-background-color: linear-gradient(to bottom, #020617, #0f172a);" +
+                    "-fx-background-radius: 0;" +
+                    "-fx-border-radius: 0;" +
+                    "-fx-border-width: 0;";
+
+    private static final Insets PADDING_WINDOWED = new Insets(0, 22, 12, 22);
+    private static final Insets PADDING_MAXIMIZED = Insets.EMPTY;
+
+    private void applyWindowChrome(BorderPane pane, boolean maximized) {
+        if (pane == null) return;
+        if (maximized) {
+            pane.setStyle(ROOT_STYLE_MAXIMIZED);
+            pane.setPadding(PADDING_MAXIMIZED);
+        } else {
+            pane.setStyle(ROOT_STYLE_WINDOWED);
+            pane.setPadding(PADDING_WINDOWED);
+        }
     }
 
-    private void logRespTransition(String what, double responsiveWidth, int cols) {
-        double stageW = (primaryStage != null) ? primaryStage.getWidth() : -1;
-        double sceneW = (primaryStage != null && primaryStage.getScene() != null) ? primaryStage.getScene().getWidth() : -1;
-
-        FxShieldDebugLog.log(
-                "[RESP] " + what +
-                        " width=" + fmtW(responsiveWidth) +
-                        " cols=" + cols +
-                        " compact=" + compactState +
-                        " diskVeryCompact=" + diskVeryCompactState +
-                        " stageW=" + fmtW(stageW) +
-                        " sceneW=" + fmtW(sceneW),
-                new RuntimeException("responsive transition")
-        );
-    }
+    // ================== APP START ==================
 
     @Override
     public void start(Stage stage) {
-        System.err.println("[DBG] DashBoardPage.start() RUNNING");
-        System.err.flush();
-
-        FxShieldDebugLog.log("[START] DashBoardPage.start(); log=" + FxShieldDebugLog.path());
-
         this.primaryStage = stage;
         stage.getProperties().put("appInstance", this);
 
         boolean startMinimized = getParameters().getRaw().contains("--minimized");
 
-        try { stage.initStyle(StageStyle.TRANSPARENT); } catch (Exception ignored) {}
+        // Frameless 100%
+        try {
+            stage.initStyle(StageStyle.TRANSPARENT);
+        } catch (Exception ex) {
+            try { stage.initStyle(StageStyle.UNDECORATED); } catch (Exception ignored) {}
+        }
+        stage.setResizable(true);
 
         setupTrayIcon(stage);
-        showSplashScreen(stage);
 
-        if (startMinimized && isTraySupported) {
-            Platform.runLater(() -> stage.setIconified(true));
-        }
+        // ✅ Show Splash in separate Stage (owned -> no extra taskbar icon)
+        showSplashStage(stage);
 
+        // ✅ Fetch config in background and ALWAYS continue
         AtomicBoolean launched = new AtomicBoolean(false);
+
+        // Failsafe: لو السيرفر علّق — بعد 7 ثواني افتح الواجهة
+        PauseTransition failsafe = new PauseTransition(javafx.util.Duration.seconds(7));
+        failsafe.setOnFinished(e -> {
+            if (launched.compareAndSet(false, true)) {
+                showDashboardAndCloseSplash(null, startMinimized);
+            }
+        });
+        failsafe.playFromStart();
 
         Thread t = new Thread(() -> {
             RemoteConfig cfg = null;
-            try { cfg = configService.fetchConfig(); } catch (Exception ignored) {}
-            RemoteConfig finalCfg = cfg;
+            try {
+                setSplashStatus("Connecting to server...");
+                cfg = configService.fetchConfig();
+            } catch (Exception ignored) {
+                setSplashStatus("Starting offline...");
+            }
 
+            RemoteConfig finalCfg = cfg;
             Platform.runLater(() -> {
                 if (!launched.compareAndSet(false, true)) return;
+                failsafe.stop();
 
                 if (finalCfg != null && finalCfg.isMaintenance()) {
+                    setSplashStatus("Service under maintenance...");
                     MaintenanceDialog.show(
-                            primaryStage,
+                            splashStage != null ? splashStage : primaryStage,
                             finalCfg,
                             configService::fetchConfig,
                             okCfg -> {
                                 if (okCfg != null && !okCfg.isMaintenance()) {
-                                    launchNormalUi(primaryStage, okCfg);
+                                    Platform.runLater(() -> showDashboardAndCloseSplash(okCfg, startMinimized));
                                 }
                             }
                     );
                     return;
                 }
 
-                launchNormalUi(primaryStage, finalCfg);
+                showDashboardAndCloseSplash(finalCfg, startMinimized);
             });
         }, "fxShield-startup-config");
 
@@ -165,7 +198,111 @@ public class DashBoardPage extends Application {
         t.start();
     }
 
-    // =============== RESPONSIVE (FINAL FIX) ===============
+    private void setSplashStatus(String text) {
+        Platform.runLater(() -> {
+            if (splashStatus != null) splashStatus.setText(text);
+        });
+    }
+
+    // ================== SPLASH (SEPARATE STAGE) ==================
+
+    private void showSplashStage(Stage owner) {
+        splashStage = new Stage();
+        try { splashStage.initStyle(StageStyle.TRANSPARENT); }
+        catch (Exception ex) { try { splashStage.initStyle(StageStyle.UNDECORATED); } catch (Exception ignored) {} }
+
+        try { splashStage.initOwner(owner); } catch (Exception ignored) {}
+
+        splashRoot = new BorderPane();
+        applyWindowChrome(splashRoot, false); // default rounded
+
+        // top-right icons (اختياري)
+        TopBarIcons topIcons = new TopBarIcons();
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+
+        HBox splashHeader = new HBox(spacer, topIcons.getRoot());
+        splashHeader.setPadding(new Insets(18, 0, 0, 0));
+        splashHeader.setPickOnBounds(true);
+
+        splashRoot.setTop(splashHeader);
+
+        VBox centerBox = new VBox(22);
+        centerBox.setAlignment(Pos.CENTER);
+
+        Label title = new Label("FX SHIELD");
+        title.setFont(Font.font("Segoe UI", 52));
+        title.setTextFill(Color.web("#93C5FD"));
+        title.setStyle("-fx-letter-spacing: 5;");
+
+        ProgressBar progress = new ProgressBar();
+        progress.setPrefWidth(320);
+        progress.setPrefHeight(6);
+        progress.setStyle("-fx-accent: #3b82f6; -fx-control-inner-background: rgba(255,255,255,0.1);");
+
+        splashStatus = new Label("Starting...");
+        splashStatus.setFont(Font.font("Segoe UI", 15));
+        splashStatus.setTextFill(Color.web("#64748b"));
+
+        centerBox.getChildren().addAll(title, progress, splashStatus);
+        splashRoot.setCenter(centerBox);
+
+        Scene splashScene = new Scene(splashRoot, 1280, 720);
+        splashScene.setFill(Color.TRANSPARENT);
+
+        splashStage.setScene(splashScene);
+        splashStage.setTitle("FX Shield - Loading");
+        splashStage.setResizable(true);
+
+        splashStage.show();
+        splashStage.toFront();
+
+        // Frameless drag + resize + fake snap hover
+        WindowsSnapFrameless.install(
+                splashStage,
+                splashScene,
+                splashHeader,
+                topIcons.getMaximizeButton(),
+                8,
+                topIcons.getInteractiveNodes()
+        );
+
+        // maximize without fullscreen
+        splashStage.setFullScreen(false);
+        splashStage.setMaximized(true);
+
+        // update radius when maximized
+        splashStage.maximizedProperty().addListener((obs, o, n) -> applyWindowChrome(splashRoot, Boolean.TRUE.equals(n)));
+        applyWindowChrome(splashRoot, splashStage.isMaximized());
+    }
+
+    private void closeSplashStage() {
+        try {
+            if (splashStage != null) {
+                splashStage.hide();
+                splashStage.close();
+            }
+        } catch (Exception ignored) {}
+        splashStage = null;
+        splashRoot = null;
+        splashStatus = null;
+    }
+
+    // ================== DASHBOARD SHOW ==================
+
+    private void showDashboardAndCloseSplash(RemoteConfig config, boolean startMinimized) {
+        // Build dashboard on primary stage
+        buildAndShowDashboard(primaryStage, config);
+
+        // close splash AFTER dashboard is visible
+        closeSplashStage();
+
+        if (startMinimized && isTraySupported) {
+            Platform.runLater(() -> primaryStage.setIconified(true));
+        }
+    }
+
+    // ================== RESPONSIVE ==================
 
     private void installResponsive(Stage stage, Scene scene) {
         if (responsiveInstalled) return;
@@ -173,57 +310,32 @@ public class DashBoardPage extends Application {
 
         responsiveDebounce.setOnFinished(e -> applyResponsiveLayoutNow(pendingWidth));
 
-        // ✅ Single source of truth: Scene width فقط (مش viewport)
-        if (scene != null) {
-            scene.widthProperty().addListener((obs, o, n) -> {
-                if (n == null) return;
-                scheduleResponsive(n.doubleValue());
-            });
-        } else {
-            // fallback
-            stage.widthProperty().addListener((obs, o, n) -> {
-                if (n == null) return;
-                scheduleResponsive(n.doubleValue());
-            });
-        }
+        scene.widthProperty().addListener((obs, o, n) -> {
+            if (n == null) return;
+            scheduleResponsive(n.doubleValue());
+        });
 
-        // initial after layout
         Platform.runLater(() -> scheduleResponsive(currentResponsiveWidth(stage)));
     }
-
 
     private double currentResponsiveWidth(Stage stage) {
         if (stage != null && stage.getScene() != null) {
             double sw = stage.getScene().getWidth();
             if (sw > 0) return sw;
         }
-        return stage != null ? stage.getWidth() : -1;
+        return (stage != null) ? stage.getWidth() : -1;
     }
 
     private void scheduleResponsive(double w) {
         if (w <= 0) return;
-
-        if (DEBUG_RESP) {
-            double stageW = (primaryStage != null) ? primaryStage.getWidth() : -1;
-            double sceneW = (primaryStage != null && primaryStage.getScene() != null) ? primaryStage.getScene().getWidth() : -1;
-            double viewportW = (mainScroll != null && mainScroll.getViewportBounds() != null) ? mainScroll.getViewportBounds().getWidth() : -1;
-            System.out.println("[RESP-SCHED] w=" + Math.rint(w)
-                    + " stageW=" + Math.rint(stageW)
-                    + " sceneW=" + Math.rint(sceneW)
-                    + " viewportW=" + Math.rint(viewportW));
-        }
-
         pendingWidth = w;
         responsiveDebounce.playFromStart();
     }
-
 
     private void applyResponsiveLayoutNow(double w) {
         if (w <= 0) return;
 
         double width = Math.rint(w);
-
-        // ✅ تجاهل تكرار نفس العرض (يقتل jitter من أي سبب)
         if (lastAppliedWidth == width) return;
         lastAppliedWidth = width;
 
@@ -233,18 +345,10 @@ public class DashBoardPage extends Application {
 
         reconfigureToolsGrid(cols);
 
-        boolean nextCompact = compactState
-                ? (width < COMPACT_OFF)
-                : (width < COMPACT_ON);
+        boolean nextCompact = compactState ? (width < COMPACT_OFF) : (width < COMPACT_ON);
 
         if (nextCompact != compactState) {
             compactState = nextCompact;
-
-            logRespTransition("compact=" + compactState, width, cols);
-
-            if (DEBUG_RESP) {
-                System.out.println("[RESP] width=" + width + " compact=" + compactState + " cols=" + cols);
-            }
 
             if (cpuCard != null) cpuCard.setCompact(compactState);
             if (ramCard != null) ramCard.setCompact(compactState);
@@ -263,14 +367,10 @@ public class DashBoardPage extends Application {
             }
         }
 
-        boolean nextDiskVeryCompact = diskVeryCompactState
-                ? (width < DISK_VC_OFF)
-                : (width < DISK_VC_ON);
+        boolean nextDiskVeryCompact = diskVeryCompactState ? (width < DISK_VC_OFF) : (width < DISK_VC_ON);
 
         if (diskSwitcher != null && nextDiskVeryCompact != diskVeryCompactState) {
             diskVeryCompactState = nextDiskVeryCompact;
-
-            logRespTransition("diskVeryCompact=" + diskVeryCompactState, width, cols);
             diskSwitcher.setVeryCompact(diskVeryCompactState);
         }
 
@@ -281,25 +381,17 @@ public class DashBoardPage extends Application {
         }
     }
 
-    // =============== UI BUILD ===============
+    // ================== UI BUILD ==================
 
-    private void launchNormalUi(Stage stage, RemoteConfig config) {
+    private void buildAndShowDashboard(Stage stage, RemoteConfig config) {
         root = new BorderPane();
-        root.setPadding(new Insets(0, 22, 12, 22));
 
-        Runnable updateStyle = () -> {
-            if (stage.isFullScreen()) {
-                root.setStyle("-fx-background-color: linear-gradient(to bottom, #020617, #0f172a); -fx-background-radius: 0; -fx-border-radius: 0; -fx-border-width: 0;");
-            } else {
-                root.setStyle("-fx-background-color: linear-gradient(to bottom, #020617, #0f172a); -fx-background-radius: 24; -fx-border-radius: 24; -fx-border-color: rgba(147,197,253,0.3); -fx-border-width: 1.5;");
-            }
-        };
-        updateStyle.run();
-        stage.fullScreenProperty().addListener((obs, o, n) -> updateStyle.run());
+        // style depends on maximized state
+        applyWindowChrome(root, stage.isMaximized());
+        stage.maximizedProperty().addListener((obs, o, n) -> applyWindowChrome(root, Boolean.TRUE.equals(n)));
 
-        appTitle = new Label("Fx Shield - System Monitor & Optimizer ");
+        appTitle = new Label("Fx Shield - System Monitor & Optimizer");
         appTitle.setFont(Font.font("Segoe UI", 22));
-        appTitle.setStyle("-fx-font-weight: bold;");
         appTitle.setTextFill(Color.web("#93C5FD"));
 
         TopBarIcons topIcons = new TopBarIcons();
@@ -386,7 +478,6 @@ public class DashBoardPage extends Application {
         Label actionsTitle = new Label("Quick Optimization Tools");
         actionsTitle.setFont(Font.font("Segoe UI", 22));
         actionsTitle.setTextFill(Color.web("#f8fafc"));
-        actionsTitle.setStyle("-fx-font-weight: bold;");
         actionsTitle.setPadding(new Insets(0, 0, 10, 0));
 
         actionsWrapper.getChildren().addAll(actionsTitle, toolsGrid);
@@ -404,34 +495,50 @@ public class DashBoardPage extends Application {
 
         root.setCenter(mainScroll);
 
-        Scene scene = new Scene(root, 1280, 720, Color.TRANSPARENT);
+        Scene scene = new Scene(root, 1280, 720);
+        scene.setFill(Color.TRANSPARENT);
         scene.getStylesheets().add("data:text/css," + encodeCss(SCROLL_CSS));
 
         stage.setTitle("FX Shield - System Monitor & Optimizer");
+        stage.setScene(scene);
 
+        // show first
+        stage.setResizable(true);
+        stage.setFullScreen(false);
+        stage.setMaximized(true);
+
+        stage.show();
+        stage.toFront();
+        stage.setIconified(false);
+
+        // install frameless
+        WindowsSnapFrameless.install(
+                stage,
+                scene,
+                header,
+                topIcons.getMaximizeButton(),
+                8,
+                topIcons.getInteractiveNodes()
+        );
+
+        // fade in
         root.setOpacity(0);
-        FadeTransition ft = new FadeTransition(javafx.util.Duration.millis(650), root);
+        FadeTransition ft = new FadeTransition(javafx.util.Duration.millis(550), root);
         ft.setFromValue(0);
         ft.setToValue(1);
+        ft.playFromStart();
 
-        stage.setScene(scene);
-        stage.setFullScreen(true);
-        stage.setFullScreenExitHint("");
-        stage.setFullScreenExitKeyCombination(KeyCombination.NO_MATCH);
-        stage.show();
-        ft.play();
-
-        // ✅ Responsive: stage width only
         installResponsive(stage, scene);
 
         stage.iconifiedProperty().addListener((obs, minimized, restored) -> {
-            if (minimized) {
+            if (Boolean.TRUE.equals(minimized)) {
                 if (monitor != null) monitor.stop();
             } else {
                 if (monitor != null) monitor.start();
             }
         });
 
+        // init monitor (background)
         new Thread(() -> {
             try {
                 AutomationService.get().apply(SettingsStore.load());
@@ -487,9 +594,7 @@ public class DashBoardPage extends Application {
                         disksRow.getChildren().add(noDisk);
                     }
 
-                    // ✅ re-apply once after disks inserted (stage width only)
-                    scheduleResponsive(stage.getWidth());
-
+                    scheduleResponsive(currentResponsiveWidth(stage));
                     m.start();
                 });
 
@@ -505,59 +610,6 @@ public class DashBoardPage extends Application {
         }, "fxShield-ui-init").start();
 
         stage.setOnCloseRequest(e -> hardExit());
-    }
-
-    private void showSplashScreen(Stage stage) {
-        BorderPane splashRoot = new BorderPane();
-        splashRoot.setPadding(new Insets(0, 22, 12, 22));
-
-        Runnable updateStyle = () -> {
-            if (stage.isFullScreen()) {
-                splashRoot.setStyle("-fx-background-color: #020617; -fx-background-radius: 0; -fx-border-radius: 0; -fx-border-width: 0;");
-            } else {
-                splashRoot.setStyle("-fx-background-color: #020617; -fx-background-radius: 24; -fx-border-radius: 24; -fx-border-color: rgba(147,197,253,0.3); -fx-border-width: 1.5;");
-            }
-        };
-        updateStyle.run();
-        stage.fullScreenProperty().addListener((obs, o, n) -> updateStyle.run());
-
-        TopBarIcons topIcons = new TopBarIcons();
-        Node topIconsRoot = topIcons.getRoot();
-
-        Region splashSpacer = new Region();
-        HBox.setHgrow(splashSpacer, Priority.ALWAYS);
-        HBox splashHeader = new HBox(splashSpacer, topIconsRoot);
-        splashHeader.setPadding(new Insets(32, 0, 0, 0));
-        splashHeader.setPickOnBounds(true);
-
-        splashRoot.setTop(splashHeader);
-
-        VBox centerBox = new VBox(25);
-        centerBox.setAlignment(Pos.CENTER);
-
-        Label title = new Label("FX SHIELD");
-        title.setFont(Font.font("Segoe UI", 52));
-        title.setTextFill(Color.web("#93C5FD"));
-        title.setStyle("-fx-font-weight: bold; -fx-letter-spacing: 5;");
-
-        ProgressBar progress = new ProgressBar();
-        progress.setPrefWidth(320);
-        progress.setPrefHeight(6);
-        progress.setStyle("-fx-accent: #3b82f6; -fx-control-inner-background: rgba(255,255,255,0.1);");
-
-        Label status = new Label("Connecting to server...");
-        status.setFont(Font.font("Segoe UI", 15));
-        status.setTextFill(Color.web("#64748b"));
-
-        centerBox.getChildren().addAll(title, progress, status);
-        splashRoot.setCenter(centerBox);
-
-        Scene scene = new Scene(splashRoot, 1280, 720, Color.TRANSPARENT);
-        stage.setTitle("FX Shield - Loading");
-        stage.setScene(scene);
-        stage.setFullScreen(true);
-        stage.setFullScreenExitHint("");
-        stage.show();
     }
 
     private void setupTrayIcon(Stage stage) {
@@ -659,24 +711,16 @@ public class DashBoardPage extends Application {
         return v;
     }
 
-    // ---------------- DB scripts ----------------
+    // ================== DB scripts ==================
 
     private enum ScriptKey {
-        FREE_RAM("FreeRam_Script", "getFreeRam_Script"),
-        OPTIMIZE_DISK("OptimizeDisk_Script", "getOptimizeDisk_Script"),
-        OPTIMIZE_NETWORK("OptimizeNetwork_Script", "getOptimizeNetwork_Script"),
-        PERFORMANCE_MODE("PerformanceMode_Script", "getPerformanceMode_Script"),
-        BALANCED_MODE("BalancedMode_Script", "getBalancedMode_Script"),
-        QUIT_MODE("QuitMode_Script", "getQuitMode_Script"),
-        SCAN_AND_FIX("ScanAndFix_Script", "getScanAndFix_Script");
-
-        final String fieldName;
-        final String getterName;
-
-        ScriptKey(String fieldName, String getterName) {
-            this.fieldName = fieldName;
-            this.getterName = getterName;
-        }
+        FREE_RAM,
+        OPTIMIZE_DISK,
+        OPTIMIZE_NETWORK,
+        PERFORMANCE_MODE,
+        BALANCED_MODE,
+        QUIT_MODE,
+        SCAN_AND_FIX
     }
 
     private RemoteConfig fetchLatestConfigSafe() {
@@ -687,20 +731,18 @@ public class DashBoardPage extends Application {
     private String getScriptFromConfig(RemoteConfig cfg, ScriptKey key) {
         if (cfg == null || key == null) return null;
 
-        try {
-            var m = cfg.getClass().getMethod(key.getterName);
-            Object v = m.invoke(cfg);
-            if (v instanceof String s) return normalizeScript(s);
-        } catch (Exception ignored) {}
-
-        try {
-            var f = cfg.getClass().getDeclaredField(key.fieldName);
-            f.setAccessible(true);
-            Object v = f.get(cfg);
-            if (v instanceof String s) return normalizeScript(s);
-        } catch (Exception ignored) {}
-
-        return null;
+        String s;
+        switch (key) {
+            case FREE_RAM -> s = cfg.getFreeRamScript();
+            case OPTIMIZE_DISK -> s = cfg.getOptimizeDiskScript();
+            case OPTIMIZE_NETWORK -> s = cfg.getOptimizeNetworkScript();
+            case PERFORMANCE_MODE -> s = cfg.getPerformanceModeScript();
+            case BALANCED_MODE -> s = cfg.getBalancedModeScript();
+            case QUIT_MODE -> s = cfg.getQuitModeScript();
+            case SCAN_AND_FIX -> s = cfg.getScanAndFixScript();
+            default -> s = null;
+        }
+        return normalizeScript(s);
     }
 
     private String normalizeScript(String s) {
@@ -853,10 +895,7 @@ public class DashBoardPage extends Application {
 
             try (BufferedReader r = new BufferedReader(
                     new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = r.readLine()) != null) {
-                    System.out.println(tag + " " + line);
-                }
+                while (r.readLine() != null) { }
             }
 
             boolean finished = p.waitFor(PS_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
@@ -958,7 +997,6 @@ public class DashBoardPage extends Application {
     }
 
     public static void main(String[] args) {
-        System.out.println("Fx Shield starting...");
         try {
             if (!WindowsUtils.isAdmin()) {
                 WindowsUtils.requestAdminAndExit();

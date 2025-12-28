@@ -9,31 +9,20 @@ import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
 
 import java.text.DecimalFormat;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class MeterCard extends BaseCard {
 
     private static final DecimalFormat DF = new DecimalFormat("0.0");
 
-    private static final String CARD_STYLE =
-            "-fx-background-color: linear-gradient(to bottom right, rgba(23, 18, 48, 0.65), rgba(13, 10, 28, 0.85));" +
-                    "-fx-background-radius: 28;" +
-                    "-fx-border-radius: 28;" +
-                    "-fx-border-color: rgba(255,255,255,0.14);" +
-                    "-fx-border-width: 1.2;" +
-                    "-fx-effect: dropshadow(gaussian, rgba(130, 80, 255, 0.22), 20, 0, 0, 4);";
+    // Fonts are cached (single allocation) via StyleConstants
+    private static final Font TITLE_NORMAL = StyleConstants.FONT_CARD_TITLE_20_BOLD;
+    private static final Font VALUE_NORMAL = StyleConstants.FONT_VALUE_18;
+    private static final Font EXTRA_NORMAL = StyleConstants.FONT_BODY_13;
 
-    // Cache fonts (avoid re-allocations)
-    private static final Font TITLE_NORMAL = Font.font(FONT_FAMILY, 20);
-    private static final Font VALUE_NORMAL = Font.font(FONT_FAMILY, 18);
-    private static final Font EXTRA_NORMAL = Font.font(FONT_FAMILY, 13);
-
-    private static final Font TITLE_COMPACT = Font.font(FONT_FAMILY, 16);
-    private static final Font VALUE_COMPACT = Font.font(FONT_FAMILY, 15);
-    private static final Font EXTRA_COMPACT = Font.font(FONT_FAMILY, 11);
-
-    // Cache Insets too (avoid allocations on toggles)
-    private static final Insets PAD_NORMAL = new Insets(22);
-    private static final Insets PAD_COMPACT = new Insets(12);
+    private static final Font TITLE_COMPACT = StyleConstants.FONT_CARD_TITLE_16_BOLD;
+    private static final Font VALUE_COMPACT = StyleConstants.FONT_VALUE_15;
+    private static final Font EXTRA_COMPACT = StyleConstants.FONT_BODY_11;
 
     private final VBox root;
     private final Label titleLabel;
@@ -41,15 +30,25 @@ public final class MeterCard extends BaseCard {
     private final Label extraLabel;
     private final ProgressBar bar;
 
-    // ✅ compact gating
-    private boolean compactState = false;
-    private boolean compactInitialized = false;
+    // Prevent UI backlog: keep only the latest update if called rapidly from background threads
+    private final AtomicBoolean uiUpdateQueued = new AtomicBoolean(false);
+    private volatile double pendingPercent = Double.NaN;
+    private volatile String pendingExtra = "";
+
+    // Small caches to avoid redundant UI work
+    private String lastUsageColor = null;
+    private double lastProgress01 = Double.NaN;
+    private String lastValueText = null;
+    private String lastExtraText = null;
 
     public MeterCard(String titleText) {
+        if (titleText == null) throw new IllegalArgumentException("titleText cannot be null");
+
         titleLabel = new Label(titleText);
         titleLabel.setTextFill(colorFromHex(COLOR_TEXT_MEDIUM));
         titleLabel.setFont(TITLE_NORMAL);
-        titleLabel.setStyle("-fx-font-weight: bold;");
+        // Keep only non-font CSS here to avoid any font shrinking side effects
+        titleLabel.setStyle("-fx-effect: none;");
         titleLabel.setMinWidth(0);
         titleLabel.setMaxWidth(Double.MAX_VALUE);
         titleLabel.setAlignment(Pos.CENTER);
@@ -66,48 +65,20 @@ public final class MeterCard extends BaseCard {
         bar = new ProgressBar(0);
         bar.setPrefWidth(260);
         setBarAccentColor(bar, COLOR_PRIMARY);
+        lastUsageColor = COLOR_PRIMARY;
+        lastProgress01 = 0.0;
 
         root = new VBox(14);
         root.setAlignment(Pos.CENTER);
-        root.setPadding(PAD_NORMAL);
-        root.setStyle(CARD_STYLE);
+        root.setPadding(new Insets(22));
+        root.setStyle(StyleConstants.CARD_STANDARD);
         root.setMinHeight(240);
         root.setMinWidth(280);
         root.setPrefWidth(320);
         root.setMaxWidth(520);
 
         extraLabel.maxWidthProperty().bind(root.widthProperty().subtract(32));
-        watchFont(titleLabel, "MeterCard.title");
-        watchFont(valueLabel, "MeterCard.value");
-        watchFont(extraLabel, "MeterCard.extra");
-        watchScale(root, "MeterCard.root");
         root.getChildren().addAll(titleLabel, valueLabel, bar, extraLabel);
-
-        // ensure first-time apply is correct
-        setCompact(false);
-    }
-
-    public void setValuePercent(double percent, String extraText) {
-        percent = clamp(percent, 0, 100);
-        valueLabel.setText(DF.format(percent) + " %");
-        extraLabel.setText(extraText != null ? extraText : "");
-        bar.setProgress(percent / 100.0);
-        applyColorByUsage(percent);
-    }
-
-    public void setValuePercent(double percent) {
-        setValuePercent(percent, "");
-    }
-
-    public void setValuePercentAsync(double percent, String extraText) {
-        Platform.runLater(() -> setValuePercent(percent, extraText));
-    }
-
-    public void setUnavailable(String message) {
-        valueLabel.setText("N/A");
-        extraLabel.setText(message != null ? message : "Not available");
-        bar.setProgress(0);
-        applyUnavailableStyle();
     }
 
     @Override
@@ -115,22 +86,55 @@ public final class MeterCard extends BaseCard {
 
     public Label getTitleLabel() { return titleLabel; }
 
+    // Safe single-entry update:
+    // - If called from FX thread: updates immediately
+    // - If called from background thread: coalesces updates (keeps latest only)
+    public void setValuePercent(double percent, String extraText) {
+        if (Platform.isFxApplicationThread()) {
+            applyValue(clamp(percent, 0, 100), extraText);
+        } else {
+            setValuePercentAsync(percent, extraText);
+        }
+    }
+
+    public void setValuePercent(double percent) {
+        setValuePercent(percent, "");
+    }
+
+    public void setValuePercentAsync(double percent, String extraText) {
+        pendingPercent = percent;
+        pendingExtra = (extraText != null) ? extraText : "";
+
+        if (!uiUpdateQueued.compareAndSet(false, true)) {
+            return; // already queued; latest values will be applied soon
+        }
+
+        Platform.runLater(() -> {
+            uiUpdateQueued.set(false);
+            applyValue(clamp(pendingPercent, 0, 100), pendingExtra);
+        });
+    }
+
+    public void setUnavailable(String message) {
+        Runnable r = () -> {
+            setTextIfChanged(valueLabel, "N/A", true);
+            setTextIfChanged(extraLabel, (message != null) ? message : "Not available", false);
+            setProgressIfChanged(0.0);
+            applyUnavailableStyle();
+        };
+
+        if (Platform.isFxApplicationThread()) r.run();
+        else Platform.runLater(r);
+    }
+
     @Override
     public void setCompact(boolean compact) {
-        // ✅ idempotent: ignore repeats
-        if (compactInitialized && compact == compactState) return;
-
-        compactInitialized = true;
-        compactState = compact;
-
-        debugCompact("MeterCard", compact);
-
         if (compact) {
             titleLabel.setFont(TITLE_COMPACT);
             valueLabel.setFont(VALUE_COMPACT);
             extraLabel.setFont(EXTRA_COMPACT);
 
-            root.setPadding(PAD_COMPACT);
+            root.setPadding(new Insets(12));
             root.setSpacing(8);
             root.setMinWidth(200);
             root.setPrefWidth(240);
@@ -140,7 +144,7 @@ public final class MeterCard extends BaseCard {
             valueLabel.setFont(VALUE_NORMAL);
             extraLabel.setFont(EXTRA_NORMAL);
 
-            root.setPadding(PAD_NORMAL);
+            root.setPadding(new Insets(22));
             root.setSpacing(14);
             root.setMinWidth(280);
             root.setPrefWidth(320);
@@ -148,14 +152,53 @@ public final class MeterCard extends BaseCard {
         }
     }
 
+    // -------- internals --------
+
+    private void applyValue(double percent, String extraText) {
+        String valueText = DF.format(percent) + " %";
+        setTextIfChanged(valueLabel, valueText, true);
+
+        String ex = (extraText != null) ? extraText : "";
+        setTextIfChanged(extraLabel, ex, false);
+
+        setProgressIfChanged(percent / 100.0);
+        applyColorByUsage(percent);
+    }
+
     private void applyColorByUsage(double percent) {
         String color = getColorByUsage(percent);
+        if (color.equals(lastUsageColor)) return;
+
+        lastUsageColor = color;
         valueLabel.setTextFill(colorFromHex(color));
-        setBarAccentColor(bar, color);
+        setBarAccentColor(bar, color); // CSS change happens only when color actually changes
     }
 
     private void applyUnavailableStyle() {
         valueLabel.setTextFill(colorFromHex(COLOR_TEXT_DIM));
-        setBarAccentColor(bar, COLOR_PRIMARY);
+        if (!COLOR_PRIMARY.equals(lastUsageColor)) {
+            lastUsageColor = COLOR_PRIMARY;
+            setBarAccentColor(bar, COLOR_PRIMARY);
+        }
+    }
+
+    private void setProgressIfChanged(double progress01) {
+        double p = clamp01(progress01);
+        if (Double.isNaN(lastProgress01) || Math.abs(lastProgress01 - p) > 0.000001) {
+            lastProgress01 = p;
+            bar.setProgress(p);
+        }
+    }
+
+    private void setTextIfChanged(Label label, String text, boolean isValueLabel) {
+        String t = (text != null) ? text : "";
+        if (isValueLabel) {
+            if (t.equals(lastValueText)) return;
+            lastValueText = t;
+        } else {
+            if (t.equals(lastExtraText)) return;
+            lastExtraText = t;
+        }
+        label.setText(t);
     }
 }

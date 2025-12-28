@@ -1,7 +1,6 @@
 // FILE: src/fxShield/DISK/PhysicalDiskSwitcher.java
 package fxShield.DISK;
 
-import fxShield.WIN.FxShieldDebugLog;
 import javafx.animation.FadeTransition;
 import javafx.animation.ParallelTransition;
 import javafx.animation.ScaleTransition;
@@ -26,8 +25,6 @@ import java.util.function.IntConsumer;
 
 public final class PhysicalDiskSwitcher {
 
-    private static final boolean DEBUG_COMPACT_STACKTRACE = Boolean.getBoolean("fxShield.debugCompact");
-
     private final HBox root;
     private final Button pill;
     private final HBox pillContent;
@@ -37,32 +34,20 @@ public final class PhysicalDiskSwitcher {
     private final Label arrow;
 
     private int count;
-    private int selected;
+    private int selected; // -1 when no disks
     private IntConsumer onSelect = i -> {};
 
-    // ✅ gate states
-    private boolean compactApplied = false;
-    private boolean veryCompactApplied = false;
+    // responsive flags (do NOT overwrite each other)
+    private boolean compactWanted = false;
+    private boolean veryCompactWanted = false;
+
+    // hover/menu state to keep pill style consistent (no padding jump)
+    private boolean hover = false;
+    private boolean menuShowing = false;
 
     /* ================= iOS STYLES ================= */
 
-    private static final String PILL =
-            "-fx-background-radius: 999;" +
-                    "-fx-padding: 6 12;" +
-                    "-fx-background-color: rgba(59,130,246,0.12);" +
-                    "-fx-border-color: rgba(59,130,246,0.25);" +
-                    "-fx-border-width: 1.5;" +
-                    "-fx-border-radius: 999;";
-
-    private static final String PILL_HOVER =
-            "-fx-background-radius: 999;" +
-                    "-fx-padding: 6 12;" +
-                    "-fx-background-color: rgba(59,130,246,0.18);" +
-                    "-fx-border-color: rgba(59,130,246,0.40);" +
-                    "-fx-border-width: 1.5;" +
-                    "-fx-border-radius: 999;" +
-                    "-fx-effect: dropshadow(gaussian, rgba(59,130,246,0.25), 8, 0.3, 0, 0);";
-
+    // (we will generate pill style dynamically to keep padding/border consistent per size)
     private static final String MENU_CARD =
             "-fx-background-color: rgba(15, 23, 42, 0.96);" +
                     "-fx-background-radius: 16;" +
@@ -122,7 +107,7 @@ public final class PhysicalDiskSwitcher {
 
     public PhysicalDiskSwitcher(int initialCount, int initialIndex, IntConsumer onSelect) {
         this.count = Math.max(0, initialCount);
-        this.selected = clamp(initialIndex, 0, Math.max(0, count - 1));
+        this.selected = (count > 0) ? clamp(initialIndex, 0, count - 1) : -1;
         if (onSelect != null) this.onSelect = onSelect;
 
         title = new Label("Disks");
@@ -142,12 +127,16 @@ public final class PhysicalDiskSwitcher {
 
         pill = new Button();
         pill.setGraphic(pillContent);
-        pill.setStyle(PILL);
         pill.setFocusTraversable(false);
 
-        pill.setOnMouseEntered(e -> pill.setStyle(PILL_HOVER));
+        // Pill hover/press – keep style consistent per size
+        pill.setOnMouseEntered(e -> {
+            hover = true;
+            applyPillStyle();
+        });
         pill.setOnMouseExited(e -> {
-            if (!menu.isShowing()) pill.setStyle(PILL);
+            hover = false;
+            applyPillStyle();
         });
 
         pill.setOnMousePressed(e -> {
@@ -164,22 +153,17 @@ public final class PhysicalDiskSwitcher {
         });
 
         menu.setOnShowing(e -> {
+            menuShowing = true;
             arrow.setText("▴");
-            pill.setStyle(PILL_HOVER);
+            applyPillStyle();
         });
 
-        menu.setOnShown(e -> Platform.runLater(() -> {
-            Node skin = (menu.getSkin() != null) ? menu.getSkin().getNode() : null;
-            if (skin == null) {
-                Platform.runLater(() -> applySkinStyles(menu));
-                return;
-            }
-            applySkinStyles(menu);
-        }));
+        menu.setOnShown(e -> Platform.runLater(() -> applySkinStyles(menu)));
 
         menu.setOnHidden(e -> {
+            menuShowing = false;
             arrow.setText("▾");
-            pill.setStyle(PILL);
+            applyPillStyle();
         });
 
         pill.setOnAction(e -> {
@@ -190,8 +174,16 @@ public final class PhysicalDiskSwitcher {
         root = new HBox(pill);
         root.setAlignment(Pos.CENTER_LEFT);
 
+        // ✅ important: enable key handling
+        root.setFocusTraversable(true);
+        root.setOnMouseClicked(e -> root.requestFocus());
+
         root.setOnKeyPressed(e -> {
-            if (count <= 0) return;
+            if (count <= 0 || selected < 0) {
+                if (e.getCode() == KeyCode.ENTER || e.getCode() == KeyCode.SPACE) pill.fire();
+                if (e.getCode() == KeyCode.ESCAPE) menu.hide();
+                return;
+            }
 
             if (e.getCode() == KeyCode.LEFT) {
                 setSelectedIndex(Math.max(0, selected - 1));
@@ -212,6 +204,7 @@ public final class PhysicalDiskSwitcher {
             }
         });
 
+        applyResponsive();     // sets fonts/padding + pill style
         rebuildMenu();
     }
 
@@ -224,11 +217,9 @@ public final class PhysicalDiskSwitcher {
 
             for (Node n : skin.lookupAll(
                     ".root, .popup-container, .context-menu, .menu, .menu-item, .menu-item-container," +
-                            ".scroll-pane, .viewport, .content, .corner, .list-view, .context-menu-container, .label, .custom-menu-item"
+                            ".scroll-pane, .viewport, .content, .corner, .list-view, .context-menu-container, .custom-menu-item"
             )) {
-                try {
-                    n.setStyle(TRANSPARENT_OVERRIDE);
-                } catch (RuntimeException ignored) {}
+                try { n.setStyle(TRANSPARENT_OVERRIDE); } catch (RuntimeException ignored) {}
             }
         } catch (RuntimeException ignored) {}
 
@@ -255,9 +246,7 @@ public final class PhysicalDiskSwitcher {
     }
 
     private void rebuildMenu() {
-        if (menu.getScene() != null) menu.getScene().setFill(null);
         menu.setStyle(MENU_CARD);
-
         menu.getItems().clear();
 
         if (count <= 0) {
@@ -270,7 +259,8 @@ public final class PhysicalDiskSwitcher {
         for (int i = 0; i < count; i++) {
             final int idx = i;
 
-            Label txt = new Label("Disk " + idx);
+            // ✅ UI label 1-based (internal index 0-based)
+            Label txt = new Label("Disk " + (idx + 1));
             txt.setStyle(TXT);
             txt.setMouseTransparent(true);
             txt.setFocusTraversable(false);
@@ -342,7 +332,55 @@ public final class PhysicalDiskSwitcher {
 
     private void refresh() {
         rebuildMenu();
-        try { onSelect.accept(selected); } catch (Exception ignored) {}
+        if (count > 0 && selected >= 0) {
+            try { onSelect.accept(selected); } catch (Exception ignored) {}
+        }
+    }
+
+    private void applyResponsive() {
+        boolean effectiveCompact = veryCompactWanted || compactWanted;
+
+        if (effectiveCompact) {
+            title.setFont(Font.font("Segoe UI", 11));
+            arrow.setFont(Font.font("Segoe UI", 10));
+            pillContent.setSpacing(4);
+        } else {
+            title.setFont(Font.font("Segoe UI", 13));
+            arrow.setFont(Font.font("Segoe UI", 12));
+            pillContent.setSpacing(8);
+        }
+
+        if (veryCompactWanted) {
+            title.setVisible(false);
+            title.setManaged(false);
+        } else {
+            title.setVisible(true);
+            title.setManaged(true);
+        }
+
+        applyPillStyle();
+    }
+
+    private void applyPillStyle() {
+        boolean effectiveCompact = veryCompactWanted || compactWanted;
+        boolean on = hover || menuShowing;
+
+        String padding = veryCompactWanted ? "3 6" : (effectiveCompact ? "3 8" : "6 12");
+        String borderW = effectiveCompact ? "1" : "1.5";
+
+        String base =
+                "-fx-background-radius: 999;" +
+                        "-fx-padding: " + padding + ";" +
+                        "-fx-background-color: rgba(59,130,246," + (on ? "0.18" : "0.12") + ");" +
+                        "-fx-border-color: rgba(59,130,246," + (on ? "0.40" : "0.25") + ");" +
+                        "-fx-border-width: " + borderW + ";" +
+                        "-fx-border-radius: 999;";
+
+        if (on) {
+            base += "-fx-effect: dropshadow(gaussian, rgba(59,130,246,0.25), 8, 0.3, 0, 0);";
+        }
+
+        pill.setStyle(base);
     }
 
     private static int clamp(int v, int min, int max) {
@@ -375,60 +413,30 @@ public final class PhysicalDiskSwitcher {
 
     public void setCount(int c) {
         count = Math.max(0, c);
-        selected = 0;
+        selected = (count > 0) ? 0 : -1;
         refresh();
     }
 
     public void setSelectedIndex(int idx) {
+        if (count <= 0) {
+            selected = -1;
+            rebuildMenu();
+            return;
+        }
         selected = clamp(idx, 0, count - 1);
         refresh();
     }
 
     public void setCompact(boolean compact) {
-        if (compactApplied == compact) return;
-        compactApplied = compact;
-
-        FxShieldDebugLog.log("[COMPACT] PhysicalDiskSwitcher setCompact(" + compact + ")");
-        if (DEBUG_COMPACT_STACKTRACE) {
-            FxShieldDebugLog.log("[COMPACT] PhysicalDiskSwitcher stack", new RuntimeException("compact call trace"));
-        }
-
-        if (compact) {
-            pill.setStyle(PILL + "-fx-padding: 3 8; -fx-border-width: 1;");
-            title.setFont(Font.font("Segoe UI", 11));
-            arrow.setFont(Font.font("Segoe UI", 10));
-            pillContent.setSpacing(4);
-        } else {
-            pill.setStyle(PILL);
-            title.setFont(Font.font("Segoe UI", 13));
-            arrow.setFont(Font.font("Segoe UI", 12));
-            pillContent.setSpacing(8);
-        }
-
-        title.setVisible(true);
-        title.setManaged(true);
+        if (this.compactWanted == compact) return;
+        this.compactWanted = compact;
+        applyResponsive();
     }
 
     public void setVeryCompact(boolean veryCompact) {
-        if (veryCompactApplied == veryCompact) return;
-        veryCompactApplied = veryCompact;
-
-        FxShieldDebugLog.log("[COMPACT] PhysicalDiskSwitcher setVeryCompact(" + veryCompact + ")");
-        if (DEBUG_COMPACT_STACKTRACE) {
-            FxShieldDebugLog.log("[COMPACT] PhysicalDiskSwitcher stack", new RuntimeException("veryCompact call trace"));
-        }
-
-        setCompact(veryCompact);
-
-        if (veryCompact) {
-            title.setVisible(false);
-            title.setManaged(false);
-            pill.setStyle(PILL + "-fx-padding: 3 6; -fx-border-width: 1;");
-        } else {
-            title.setVisible(true);
-            title.setManaged(true);
-            pill.setStyle(PILL);
-        }
+        if (this.veryCompactWanted == veryCompact) return;
+        this.veryCompactWanted = veryCompact;
+        applyResponsive();
     }
 
     public int getSelectedIndex() { return selected; }

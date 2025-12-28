@@ -7,8 +7,8 @@ import java.util.concurrent.*;
  * Schedules background automations (free RAM / optimize disk).
  * - Daemon single-thread scheduler
  * - Idempotent apply (no restart if unchanged)
- * - PowerShell execution with timeout and safe drain
- * - Graceful stop and shutdown hook
+ * - PowerShell execution with timeout (delegated to WindowsUtils)
+ * - Tasks are exception-safe (won't stop silently)
  */
 public final class AutomationService implements AutoCloseable {
 
@@ -19,6 +19,7 @@ public final class AutomationService implements AutoCloseable {
     // Scheduling
     private static final long FREE_RAM_INITIAL_DELAY_SEC = 30;
     private static final long FREE_RAM_PERIOD_SEC = 10 * 60;
+
     private static final long DISK_INITIAL_DELAY_SEC = 60;
     private static final long DISK_PERIOD_SEC = 30 * 60;
 
@@ -32,63 +33,103 @@ public final class AutomationService implements AutoCloseable {
         Runtime.getRuntime().addShutdownHook(new Thread(this::stop, "fxShield-automation-shutdown"));
     }
 
-    // Apply settings idempotently
     public synchronized void apply(FxSettings settings) {
         FxSettings s = (settings != null) ? settings : FxSettings.defaults();
         if (equalsLast(s)) return;
 
         stop();
-        exec = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "fxShield-automation");
-            t.setDaemon(true);
-            return t;
-        });
 
-        if (s.autoFreeRam) {
-            exec.scheduleAtFixedRate(this::runFreeRam, FREE_RAM_INITIAL_DELAY_SEC, FREE_RAM_PERIOD_SEC, TimeUnit.SECONDS);
+        if (!WindowsUtils.isWindows()) {
+            // Still persist lastApplied so we don't loop on apply()
+            lastApplied = new FxSettings(s);
+            return;
         }
-        if (s.autoOptimizeHardDisk) {
-            exec.scheduleAtFixedRate(this::runOptimizeDisk, DISK_INITIAL_DELAY_SEC, DISK_PERIOD_SEC, TimeUnit.SECONDS);
+
+        boolean needScheduler = s.autoFreeRam || s.autoOptimizeHardDisk;
+        if (needScheduler) {
+            exec = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread t = new Thread(r, "fxShield-automation");
+                t.setDaemon(true);
+                return t;
+            });
+
+            if (s.autoFreeRam) {
+                exec.scheduleWithFixedDelay(
+                        this::safeRunFreeRam,
+                        FREE_RAM_INITIAL_DELAY_SEC,
+                        FREE_RAM_PERIOD_SEC,
+                        TimeUnit.SECONDS
+                );
+            }
+
+            if (s.autoOptimizeHardDisk) {
+                exec.scheduleWithFixedDelay(
+                        this::safeRunOptimizeDisk,
+                        DISK_INITIAL_DELAY_SEC,
+                        DISK_PERIOD_SEC,
+                        TimeUnit.SECONDS
+                );
+            }
         }
+
         // Optional OS integration
-        try { WindowsUtils.applyStartup(s.autoStartWithWindows); } catch (Throwable ignored) {}
+        try { WindowsUtils.applyStartup(s.autoStartWithWindows); }
+        catch (Throwable ignored) {}
 
         lastApplied = new FxSettings(s);
     }
 
     public synchronized void stop() {
-        if (exec != null) {
-            exec.shutdownNow();
-            try { exec.awaitTermination(2, TimeUnit.SECONDS); } catch (InterruptedException ignored) {
-                Thread.currentThread().interrupt();
-            }
-            exec = null;
+        ScheduledExecutorService e = exec;
+        exec = null;
+
+        if (e != null) {
+            e.shutdownNow();
+            try { e.awaitTermination(2, TimeUnit.SECONDS); }
+            catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
         }
     }
 
     @Override
     public void close() { stop(); }
 
+    // ===== Exception-safe wrappers =====
+
+    private void safeRunFreeRam() {
+        try { runFreeRam(); }
+        catch (Throwable ignored) {}
+    }
+
+    private void safeRunOptimizeDisk() {
+        try { runOptimizeDisk(); }
+        catch (Throwable ignored) {}
+    }
+
     // ===== Tasks =====
+
     private void runFreeRam() {
         String ps =
-                "$ErrorActionPreference='SilentlyContinue';" +
-                        "Remove-Item -Path \"$env:TEMP\\*\" -Recurse -Force -ErrorAction SilentlyContinue;" +
-                        "Remove-Item -Path \"$env:WINDIR\\Prefetch\\*\" -Recurse -Force -ErrorAction SilentlyContinue;" +
-                        "Remove-Item -Path \"$env:APPDATA\\Microsoft\\Windows\\Recent\\*\" -Recurse -Force -ErrorAction SilentlyContinue;";
+                "$ErrorActionPreference='SilentlyContinue'\n" +
+                        "Remove-Item -Path \"$env:TEMP\\*\" -Recurse -Force -ErrorAction SilentlyContinue\n" +
+                        "Remove-Item -Path \"$env:WINDIR\\Temp\\*\" -Recurse -Force -ErrorAction SilentlyContinue\n" +
+                        "Remove-Item -Path \"$env:WINDIR\\Prefetch\\*\" -Recurse -Force -ErrorAction SilentlyContinue\n" +
+                        "Remove-Item -Path \"$env:APPDATA\\Microsoft\\Windows\\Recent\\*\" -Recurse -Force -ErrorAction SilentlyContinue\n";
         runPowerShell(ps);
     }
 
     private void runOptimizeDisk() {
+        // cleanmgr is legacy لكنه آمن وبسيط. تشغيله كـ Start-Process يقلل التعليق.
         String ps =
-                "$ErrorActionPreference='SilentlyContinue';" +
-                        "cleanmgr /verylowdisk | Out-Null;";
+                "$ErrorActionPreference='SilentlyContinue'\n" +
+                        "Start-Process -FilePath 'cleanmgr.exe' -ArgumentList '/VERYLOWDISK' -WindowStyle Hidden -Wait | Out-Null\n";
         runPowerShell(ps);
     }
 
     // ===== PowerShell helper =====
+
     private void runPowerShell(String script) {
-        WindowsUtils.runPowerShellSilent(script, 30);
+        long sec = Math.max(1, POWERSHELL_TIMEOUT.toSeconds());
+        WindowsUtils.runPowerShellSilent(script, sec);
     }
 
     private boolean equalsLast(FxSettings s) {

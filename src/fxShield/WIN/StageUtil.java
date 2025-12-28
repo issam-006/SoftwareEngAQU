@@ -23,9 +23,11 @@ import java.util.function.Function;
  */
 public final class StageUtil {
 
-    private StageUtil() {}
+    private StageUtil() {
+    }
 
     // -------- Owner resolution --------
+
     public static Optional<Stage> findOwner(Node anyNodeInsideStage) {
         if (anyNodeInsideStage == null || anyNodeInsideStage.getScene() == null) return Optional.empty();
         var w = anyNodeInsideStage.getScene().getWindow();
@@ -43,27 +45,49 @@ public final class StageUtil {
     }
 
     // -------- Positioning --------
+
     public static void centerOnOwner(Stage child, Stage owner) {
         if (child == null || owner == null) return;
+
         // Ensure sizes are computed
-        if (child.getWidth() <= 1 || child.getHeight() <= 1) child.sizeToScene();
+        if (child.getWidth() <= 1 || child.getHeight() <= 1) {
+            child.sizeToScene();
+        }
+
         double x = owner.getX() + (owner.getWidth() - child.getWidth()) / 2.0;
         double y = owner.getY() + (owner.getHeight() - child.getHeight()) / 2.0;
+
         child.setX(x);
         child.setY(y);
+
         clampToScreen(child);
     }
 
     public static void clampToScreen(Stage stage) {
         if (stage == null) return;
-        Rectangle2D vb = Screen.getScreensForRectangle(stage.getX(), stage.getY(), stage.getWidth(), stage.getHeight())
-                .stream().findFirst().orElse(Screen.getPrimary()).getVisualBounds();
 
-        double x = stage.getX(), y = stage.getY();
-        double w = stage.getWidth(), h = stage.getHeight();
+        Rectangle2D vb = Screen.getScreensForRectangle(
+                        stage.getX(), stage.getY(),
+                        Math.max(1, stage.getWidth()), Math.max(1, stage.getHeight()))
+                .stream()
+                .findFirst()
+                .orElse(Screen.getPrimary())
+                .getVisualBounds();
 
-        if (w > vb.getWidth()) w = vb.getWidth();
-        if (h > vb.getHeight()) h = vb.getHeight();
+        double x = stage.getX();
+        double y = stage.getY();
+        double w = stage.getWidth();
+        double h = stage.getHeight();
+
+        // If the stage is bigger than the visible area, shrink it (actual stage size)
+        if (w > vb.getWidth()) {
+            w = vb.getWidth();
+            stage.setWidth(w);
+        }
+        if (h > vb.getHeight()) {
+            h = vb.getHeight();
+            stage.setHeight(h);
+        }
 
         if (x < vb.getMinX()) x = vb.getMinX();
         if (y < vb.getMinY()) y = vb.getMinY();
@@ -75,8 +99,10 @@ public final class StageUtil {
     }
 
     // -------- Modal helpers --------
+
     public static void showModalOver(Node anchor, Stage dialog) {
         Objects.requireNonNull(dialog, "dialog");
+
         withOwner(anchor, owner -> {
             dialog.initOwner(owner);
             dialog.initModality(Modality.APPLICATION_MODAL);
@@ -87,13 +113,16 @@ public final class StageUtil {
     }
 
     // -------- Blur guard --------
+
     public static BlurGuard applyBlur(Stage owner, double radius) {
         if (owner == null || owner.getScene() == null || owner.getScene().getRoot() == null) {
             return BlurGuard.noop();
         }
+
         var root = owner.getScene().getRoot();
         Effect prev = root.getEffect();
-        root.setEffect(new GaussianBlur(Math.max(0, radius)));
+
+        runFx(() -> root.setEffect(new GaussianBlur(Math.max(0, radius))));
         return new BlurGuard(owner, prev);
     }
 
@@ -107,18 +136,22 @@ public final class StageUtil {
             this.previous = previous;
         }
 
-        static BlurGuard noop() { return new BlurGuard(null, null); }
+        static BlurGuard noop() {
+            return new BlurGuard(null, null);
+        }
 
-        @Override public void close() {
+        @Override
+        public void close() {
             if (closed) return;
             closed = true;
-            if (owner != null && owner.getScene() != null && owner.getScene().getRoot() != null) {
-                owner.getScene().getRoot().setEffect(previous);
-            }
+
+            if (owner == null || owner.getScene() == null || owner.getScene().getRoot() == null) return;
+            runFx(() -> owner.getScene().getRoot().setEffect(previous));
         }
     }
 
     // -------- Thread helper --------
+
     public static void runFx(Runnable r) {
         if (r == null) return;
         if (Platform.isFxApplicationThread()) r.run();

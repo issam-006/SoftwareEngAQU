@@ -3,11 +3,7 @@ package fxShield.UI;
 import fxShield.WIN.AutomationService;
 import fxShield.WIN.FxSettings;
 import fxShield.WIN.SettingsStore;
-import javafx.animation.FadeTransition;
-import javafx.animation.Interpolator;
-import javafx.animation.ParallelTransition;
-import javafx.animation.ScaleTransition;
-import javafx.animation.TranslateTransition;
+import javafx.animation.*;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Cursor;
@@ -19,6 +15,7 @@ import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
@@ -28,6 +25,8 @@ import java.util.function.Consumer;
 
 public final class SettingsDialog {
 
+    private SettingsDialog() {}
+
     // ====== Palette (Dark Blue) ======
     private static final String BG_TOP = "#020617";   // very dark blue
     private static final String BG_MID = "#0b1224";   // deep blue
@@ -36,12 +35,18 @@ public final class SettingsDialog {
     private static final String TEXT_MAIN = "#e5e7eb";
     private static final String TEXT_SUB  = "#9ca3af";
 
+    // ====== Fonts (avoid CSS font-weight) ======
+    private static final Font FONT_TITLE = Font.font("Segoe UI", FontWeight.EXTRA_BOLD, 18);
+    private static final Font FONT_SUB   = Font.font("Segoe UI", FontWeight.NORMAL, 12);
+    private static final Font FONT_ROW_T = Font.font("Segoe UI", FontWeight.EXTRA_BOLD, 14);
+    private static final Font FONT_ROW_D = Font.font("Segoe UI", FontWeight.NORMAL, 12);
+
     // ====== Styles ======
     private static final String DIALOG_ROOT_STYLE =
             "-fx-background-color: linear-gradient(to bottom, " + BG_TOP + ", " + BG_MID + ");" +
                     "-fx-background-radius: 22;" +
                     "-fx-border-radius: 22;" +
-                    "-fx-border-color: rgba(147,197,253,0.18);" + // soft blue border
+                    "-fx-border-color: rgba(147,197,253,0.18);" +
                     "-fx-border-width: 1;" +
                     "-fx-effect: dropshadow(gaussian, rgba(37,99,235,0.22), 28, 0.22, 0, 0)," +
                     "           dropshadow(gaussian, rgba(124,58,237,0.18), 22, 0.18, 0, 0)," +
@@ -96,16 +101,17 @@ public final class SettingsDialog {
         FxSettings s = SettingsStore.load();
 
         Stage dialog = new Stage();
-        dialog.initOwner(owner);
+        if (owner != null) dialog.initOwner(owner);
         dialog.initModality(Modality.APPLICATION_MODAL);
         dialog.initStyle(StageStyle.TRANSPARENT);
+        dialog.setResizable(false);
         dialog.setTitle("Settings");
 
         BorderPane root = new BorderPane();
         root.setPadding(new Insets(16, 24, 28, 24));
         root.setStyle(DIALOG_ROOT_STYLE);
 
-        // ✅ Clip للزوايا المنحنية
+        // Clip for rounded corners
         Rectangle clip = new Rectangle();
         clip.setArcWidth(44);
         clip.setArcHeight(44);
@@ -115,12 +121,11 @@ public final class SettingsDialog {
 
         // ===== Header =====
         Label title = new Label("Settings");
-        title.setFont(Font.font("Segoe UI", 18));
+        title.setFont(FONT_TITLE);
         title.setTextFill(Color.web(TEXT_MAIN));
-        title.setStyle("-fx-font-weight: 800;");
 
         Label sub = new Label("Choose what you want to run automatically.");
-        sub.setFont(Font.font("Segoe UI", 12));
+        sub.setFont(FONT_SUB);
         sub.setTextFill(Color.web(TEXT_SUB));
 
         VBox titleBox = new VBox(4, title, sub);
@@ -154,19 +159,32 @@ public final class SettingsDialog {
         applyBtn.setStyle(BTN_APPLY_NORMAL);
         applyBtn.setOnMouseEntered(e -> applyBtn.setStyle(BTN_APPLY_HOVER));
         applyBtn.setOnMouseExited(e -> applyBtn.setStyle(BTN_APPLY_NORMAL));
+
         applyBtn.setOnAction(e -> {
+            applyBtn.setDisable(true);
+            cancelBtn.setDisable(true);
+
             FxSettings ns = new FxSettings();
             ns.autoFreeRam = vFree[0];
             ns.autoOptimizeHardDisk = vDisk[0];
             ns.autoStartWithWindows = vStart[0];
-            
-            // Save to persistent store
-            SettingsStore.save(ns);
-            
-            // Apply changes immediately to running service
-            AutomationService.get().apply(ns);
-            
-            dialog.close();
+
+            Thread t = new Thread(() -> {
+                try {
+                    SettingsStore.save(ns);
+                } catch (Throwable ignored) {}
+
+                try {
+                    AutomationService.get().apply(ns);
+                } catch (Throwable ignored) {}
+
+                javafx.application.Platform.runLater(() -> {
+                    try { dialog.close(); } catch (Throwable ignored) {}
+                });
+            }, "fxShield-settings-apply");
+
+            t.setDaemon(true);
+            t.start();
         });
 
         HBox bottom = new HBox(10, cancelBtn, applyBtn);
@@ -174,9 +192,8 @@ public final class SettingsDialog {
         bottom.setPadding(new Insets(18, 0, 6, 0));
         root.setBottom(bottom);
 
-        // ✅ لا تجعل الخلفية شفافة (عشان ما يصير أبيض)
         Scene scene = new Scene(root, 900, 420);
-        scene.setFill(Color.web(String.valueOf(Color.TRANSPARENT)));
+        scene.setFill(Color.TRANSPARENT); // ✅ الصحيح مع StageStyle.TRANSPARENT
 
         scene.setOnKeyPressed(k -> {
             if (k.getCode() == KeyCode.ESCAPE) dialog.close();
@@ -209,17 +226,16 @@ public final class SettingsDialog {
     // ===== Modern Toggle Row =====
     private static HBox toggleRow(String title, String desc, boolean initial, Consumer<Boolean> onChange) {
         Label t = new Label(title);
-        t.setFont(Font.font("Segoe UI", 14));
+        t.setFont(FONT_ROW_T);
         t.setTextFill(Color.web(TEXT_MAIN));
-        t.setStyle("-fx-font-weight: 800;");
 
         Label d = new Label(desc);
-        d.setFont(Font.font("Segoe UI", 12));
+        d.setFont(FONT_ROW_D);
         d.setTextFill(Color.web(TEXT_SUB));
 
         VBox texts = new VBox(2, t, d);
 
-        // ===== Switch (Track + Knob) =====
+        // Switch track/knob
         Region track = new Region();
         track.setPrefSize(56, 30);
         track.setMinSize(56, 30);
@@ -243,7 +259,7 @@ public final class SettingsDialog {
                 track.setStyle(
                         "-fx-background-radius: 999;" +
                                 "-fx-border-radius: 999;" +
-                                "-fx-background-color: rgba(37,99,235,0.78);" +       // ✅ أزرق داكن
+                                "-fx-background-color: rgba(37,99,235,0.78);" +
                                 "-fx-border-color: rgba(147,197,253,0.65);" +
                                 "-fx-border-width: 1;" +
                                 "-fx-effect: dropshadow(gaussian, rgba(37,99,235,0.40), 16, 0.22, 0, 0);"
@@ -258,11 +274,10 @@ public final class SettingsDialog {
                 );
             }
 
-            // ✅ غيرنا الأبيض: صارت الدائرة "أوف وايت" ناعمة مع حد خفيف
             knob.setStyle(
                     "-fx-background-radius: 999;" +
                             "-fx-border-radius: 999;" +
-                            "-fx-background-color: #eaf2ff;" +                 // بدل white
+                            "-fx-background-color: #eaf2ff;" +
                             "-fx-border-color: rgba(147,197,253,0.35);" +
                             "-fx-border-width: 1;" +
                             "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.35), 10, 0.22, 0, 2);"
@@ -270,8 +285,6 @@ public final class SettingsDialog {
         };
 
         applySwitchStyle.run();
-
-        // initial knob position
         knob.setTranslateX(state[0] ? 14 : -14);
 
         Runnable toggle = () -> {
@@ -288,7 +301,6 @@ public final class SettingsDialog {
 
         switcher.setOnMouseClicked(e -> toggle.run());
 
-        // ===== Row Layout =====
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
@@ -314,9 +326,10 @@ public final class SettingsDialog {
         row.setOnMouseEntered(e -> row.setStyle(hoverRow));
         row.setOnMouseExited(e -> row.setStyle(normalRow));
 
-        // click on row toggles too (but not double click on switch)
+        // Row click toggles too (avoid double trigger when clicking switch nodes)
         row.setOnMouseClicked(e -> {
-            if (e.getTarget() == switcher || e.getTarget() == track || e.getTarget() == knob) return;
+            Object target = e.getTarget();
+            if (target == switcher || target == track || target == knob) return;
             toggle.run();
         });
 

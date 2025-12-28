@@ -3,75 +3,196 @@ package fxShield.DB;
 import java.io.Serial;
 import java.io.Serializable;
 
+/**
+ * Configuration class for remote settings and PowerShell scripts.
+ * Used for application updates, maintenance mode, and system optimization scripts.
+ */
 public final class RemoteConfig implements Serializable {
 
-    @Serial private static final long serialVersionUID = 1L;
+    @Serial
+    private static final long serialVersionUID = 1L;
 
+    // Application status and version info
     private String appStatus;
     private String latestVersion;
     private String minVersion;
-
     private String downloadUrl;
     private String updateMessage;
     private boolean forceUpdate;
 
-    // Scripts (PowerShell text)
-    private String FreeRam_Script;
-    private String OptimizeDisk_Script;
-    private String OptimizeNetwork_Script;
-    private String PerformanceMode_Script;
-    private String BalancedMode_Script;
-    private String QuitMode_Script;
-    private String ScanAndFix_Script;
+    // PowerShell scripts for system optimization
+    private String freeRamScript;
+    private String optimizeDiskScript;
+    private String optimizeNetworkScript;
+    private String performanceModeScript;
+    private String balancedModeScript;
+
+    // ✅ Fix: QUIET (not QUIT)
+    // Keep backward compatibility with older payloads/field names.
+    private String quietModeScript;
+    private String quitModeScript; // legacy alias (old typo)
+
+    private String scanAndFixScript;
 
     public RemoteConfig() {}
 
-    public String getAppStatus() { return appStatus; }
-    public void setAppStatus(String appStatus) { this.appStatus = trimOrNull(appStatus); }
+    // =========================================================================
+    // Application Status and Version Methods
+    // =========================================================================
 
-    public String getLatestVersion() { return latestVersion; }
-    public void setLatestVersion(String latestVersion) { this.latestVersion = trimOrNull(latestVersion); }
+    public String getAppStatus() {
+        return appStatus;
+    }
 
-    public String getMinVersion() { return minVersion; }
-    public void setMinVersion(String minVersion) { this.minVersion = trimOrNull(minVersion); }
+    public void setAppStatus(String appStatus) {
+        this.appStatus = trimOrNull(appStatus);
+    }
 
-    public String getDownloadUrl() { return downloadUrl; }
-    public void setDownloadUrl(String downloadUrl) { this.downloadUrl = trimOrNull(downloadUrl); }
+    public String getLatestVersion() {
+        return latestVersion;
+    }
 
-    public String getUpdateMessage() { return updateMessage; }
-    public void setUpdateMessage(String updateMessage) { this.updateMessage = trimOrNull(updateMessage); }
+    public void setLatestVersion(String latestVersion) {
+        this.latestVersion = trimOrNull(latestVersion);
+    }
 
-    public boolean isForceUpdate() { return forceUpdate; }
-    public void setForceUpdate(boolean forceUpdate) { this.forceUpdate = forceUpdate; }
+    public String getMinVersion() {
+        return minVersion;
+    }
 
+    public void setMinVersion(String minVersion) {
+        this.minVersion = trimOrNull(minVersion);
+    }
+
+    public String getDownloadUrl() {
+        return downloadUrl;
+    }
+
+    public void setDownloadUrl(String downloadUrl) {
+        this.downloadUrl = trimOrNull(downloadUrl);
+    }
+
+    public String getUpdateMessage() {
+        return updateMessage;
+    }
+
+    public void setUpdateMessage(String updateMessage) {
+        this.updateMessage = trimOrNull(updateMessage);
+    }
+
+    public boolean isForceUpdate() {
+        return forceUpdate;
+    }
+
+    public void setForceUpdate(boolean forceUpdate) {
+        this.forceUpdate = forceUpdate;
+    }
+
+    /**
+     * @return true if appStatus is "maintenance"
+     */
     public boolean isMaintenance() {
         return appStatus != null && appStatus.equalsIgnoreCase("maintenance");
     }
 
+    /**
+     * @return true if appStatus is null or "online"
+     */
     public boolean isOnline() {
         return appStatus == null || appStatus.equalsIgnoreCase("online");
     }
 
-    public String getFreeRam_Script() { return FreeRam_Script; }
-    public void setFreeRam_Script(String v) { this.FreeRam_Script = trimOrNull(v); }
+    // =========================================================================
+    // Script Accessor Methods
+    // =========================================================================
 
-    public String getOptimizeDisk_Script() { return OptimizeDisk_Script; }
-    public void setOptimizeDisk_Script(String v) { this.OptimizeDisk_Script = trimOrNull(v); }
+    public String getFreeRamScript() {
+        return freeRamScript;
+    }
 
-    public String getOptimizeNetwork_Script() { return OptimizeNetwork_Script; }
-    public void setOptimizeNetwork_Script(String v) { this.OptimizeNetwork_Script = trimOrNull(v); }
+    public void setFreeRamScript(String v) {
+        this.freeRamScript = trimOrNull(v);
+    }
 
-    public String getPerformanceMode_Script() { return PerformanceMode_Script; }
-    public void setPerformanceMode_Script(String v) { this.PerformanceMode_Script = trimOrNull(v); }
+    public String getOptimizeDiskScript() {
+        return optimizeDiskScript;
+    }
 
-    public String getBalancedMode_Script() { return BalancedMode_Script; }
-    public void setBalancedMode_Script(String v) { this.BalancedMode_Script = trimOrNull(v); }
+    public void setOptimizeDiskScript(String v) {
+        this.optimizeDiskScript = trimOrNull(v);
+    }
 
-    public String getQuitMode_Script() { return QuitMode_Script; }
-    public void setQuitMode_Script(String v) { this.QuitMode_Script = trimOrNull(v); }
+    public String getOptimizeNetworkScript() {
+        return optimizeNetworkScript;
+    }
 
-    public String getScanAndFix_Script() { return ScanAndFix_Script; }
-    public void setScanAndFix_Script(String v) { this.ScanAndFix_Script = trimOrNull(v); }
+    public void setOptimizeNetworkScript(String v) {
+        this.optimizeNetworkScript = trimOrNull(v);
+    }
+
+    public String getPerformanceModeScript() {
+        return performanceModeScript;
+    }
+
+    public void setPerformanceModeScript(String v) {
+        this.performanceModeScript = trimOrNull(v);
+    }
+
+    public String getBalancedModeScript() {
+        return balancedModeScript;
+    }
+
+    public void setBalancedModeScript(String v) {
+        this.balancedModeScript = trimOrNull(v);
+    }
+
+    /**
+     * ✅ Correct getter: Quiet Mode script.
+     */
+    public String getQuietModeScript() {
+        String q = trimOrNull(quietModeScript);
+        if (q != null) return q;
+        return trimOrNull(quitModeScript); // legacy
+    }
+
+    /**
+     * ✅ Correct setter: Quiet Mode script.
+     */
+    public void setQuietModeScript(String v) {
+        String t = trimOrNull(v);
+        this.quietModeScript = t;
+        this.quitModeScript = t; // keep legacy in sync
+    }
+
+    /**
+     * ⚠ Legacy typo support (backward compatibility).
+     * Prefer getQuietModeScript()/setQuietModeScript().
+     */
+    @Deprecated
+    public String getQuitModeScript() {
+        return getQuietModeScript();
+    }
+
+    /**
+     * ⚠ Legacy typo support (backward compatibility).
+     * Prefer getQuietModeScript()/setQuietModeScript().
+     */
+    @Deprecated
+    public void setQuitModeScript(String v) {
+        setQuietModeScript(v);
+    }
+
+    public String getScanAndFixScript() {
+        return scanAndFixScript;
+    }
+
+    public void setScanAndFixScript(String v) {
+        this.scanAndFixScript = trimOrNull(v);
+    }
+
+    // =========================================================================
+    // Utility Methods
+    // =========================================================================
 
     private static String trimOrNull(String s) {
         if (s == null) return null;

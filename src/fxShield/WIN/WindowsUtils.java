@@ -1,37 +1,44 @@
 package fxShield.WIN;
 
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.util.concurrent.TimeUnit;
-import java.io.File;
-import javax.swing.JOptionPane;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.IOException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import javafx.application.Platform;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.swing.JOptionPane;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.Base64;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
+
 /**
- * Base class for Windows-specific utilities.
- * Provides common functionality for PowerShell execution and Windows detection.
+ * Windows-specific utilities for PowerShell execution and Windows detection.
+ * - Robust PowerShell runner (no deadlocks, supports long scripts)
+ * - Reliable elevation (RunAs)
+ * - Startup registry management
  */
 public final class WindowsUtils {
 
     private static final Logger logger = LoggerFactory.getLogger(WindowsUtils.class);
 
+    // Registry constants for startup management
+    private static final String RUN_KEY = "HKCU:\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run";
+    private static final String APP_NAME = "FxShield";
 
-    /**
-     * Private constructor to prevent direct instantiation.
-     */
+    // PowerShell defaults
+    private static final Duration DEFAULT_PS_TIMEOUT = Duration.ofSeconds(30);
+
     private WindowsUtils() {}
 
-    /**
-     * Result of a PowerShell command execution.
-     */
-    public static class PsResult {
+    // =========================================================================
+    // Result
+    // =========================================================================
+
+    public static final class PsResult {
         public final int exitCode;
         public final String stdout;
         public final String stderr;
@@ -47,162 +54,248 @@ public final class WindowsUtils {
         }
     }
 
-    /**
-     * Checks if the current operating system is Windows.
-     * @return true if running on Windows, false otherwise
-     */
+    // =========================================================================
+    // System Detection
+    // =========================================================================
+
     public static boolean isWindows() {
         String os = System.getProperty("os.name", "").toLowerCase();
         return os.contains("win");
     }
 
     /**
-     * Escapes a string for use in PowerShell single-quoted strings.
-     * @param s the string to escape
-     * @return the escaped string
-     */
-    public static String escapeForPowerShell(String s) {
-        return s.replace("'", "''");
-    }
-
-    /**
-     * Checks if the current process has Administrator privileges.
-     * Uses 'net session' command which returns 0 only if running as admin.
+     * More reliable than "net session" on some systems.
      */
     public static boolean isAdmin() {
         if (!isWindows()) return true;
 
-        try {
-            return new ProcessBuilder("net", "session")
-                    .start()
-                    .waitFor() == 0;
-        } catch (Exception e) {
-            return false;
+        String ps = "([Security.Principal.WindowsPrincipal] " +
+                "[Security.Principal.WindowsIdentity]::GetCurrent())" +
+                ".IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)";
+
+        String out = runPowerShellCapture(ps, 3);
+        if (out == null) return false;
+        return out.trim().equalsIgnoreCase("true");
+    }
+
+    // =========================================================================
+    // PowerShell quoting / encoding
+    // =========================================================================
+
+    /**
+     * Escapes for PowerShell single-quoted string literal.
+     */
+    public static String escapeForPowerShell(String s) {
+        if (s == null) return "";
+        return s.replace("'", "''");
+    }
+
+    private static String psSingleQuote(String s) {
+        return "'" + escapeForPowerShell(s) + "'";
+    }
+
+    private static String getPowerShellExe() {
+        String sysRoot = System.getenv("SystemRoot");
+        if (sysRoot != null && !sysRoot.isBlank()) {
+            File f = new File(sysRoot, "System32\\WindowsPowerShell\\v1.0\\powershell.exe");
+            if (f.exists()) return f.getAbsolutePath();
         }
+        return "powershell.exe";
     }
 
     /**
-     * Relaunches the application with Administrator privileges using PowerShell 'RunAs' verb.
-     * Then exits the current process.
+     * Wrap script to force UTF-8 console output (prevents garbled text).
      */
+    private static String wrapUtf8(String script) {
+        String s = script == null ? "" : script;
+        return ""
+                + "$ProgressPreference='SilentlyContinue'\n"
+                + "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8\n"
+                + "$OutputEncoding=[Console]::OutputEncoding\n"
+                + s;
+    }
+
+    private static String toEncodedCommand(String script) {
+        byte[] utf16 = wrapUtf8(script).getBytes(StandardCharsets.UTF_16LE);
+        return Base64.getEncoder().encodeToString(utf16);
+    }
+
+    private static ProcessBuilder psEncoded(String script) {
+        String exe = getPowerShellExe();
+        String encoded = toEncodedCommand(script);
+
+        ProcessBuilder pb = new ProcessBuilder(
+                exe,
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy", "Bypass",
+                "-EncodedCommand", encoded
+        );
+        pb.redirectErrorStream(false);
+        return pb;
+    }
+
+    // =========================================================================
+    // Admin Elevation
+    // =========================================================================
+
     public static void requestAdminAndExit() {
         try {
-            String fullCommand = getFullCommand();
-            if (fullCommand == null) return;
-
-            String executable;
-            String arguments;
-
-            if (fullCommand.startsWith("\"")) {
-                int secondQuote = fullCommand.indexOf("\"", 1);
-                if (secondQuote != -1) {
-                    executable = fullCommand.substring(1, secondQuote);
-                    arguments = fullCommand.substring(secondQuote + 1).trim();
-                } else {
-                    executable = fullCommand;
-                    arguments = "";
-                }
-            } else {
-                int firstSpace = fullCommand.indexOf(" ");
-                if (firstSpace == -1) {
-                    executable = fullCommand;
-                    arguments = "";
-                } else {
-                    executable = fullCommand.substring(0, firstSpace);
-                    arguments = fullCommand.substring(firstSpace + 1).trim();
-                }
+            CommandParts parts = getCurrentProcessCommandParts();
+            if (parts == null || parts.executable == null || parts.executable.isBlank()) {
+                showPermissionErrorDialog();
+                return;
             }
 
-            String psCommand;
-            if (arguments.isEmpty()) {
-                psCommand = String.format(
-                    "Start-Process -FilePath '%s' -Verb RunAs -WindowStyle Normal",
-                    escapeForPowerShell(executable)
-                );
-            } else {
-                psCommand = String.format(
-                    "Start-Process -FilePath '%s' -ArgumentList '%s' -Verb RunAs -WindowStyle Normal",
-                    escapeForPowerShell(executable),
-                    escapeForPowerShell(arguments)
-                );
+            String elevatePs = buildElevationScript(parts);
+            logger.info("Requesting elevation for: {}", parts.executable);
+
+            PsResult r = runPowerShellInternal(elevatePs, Duration.ofSeconds(8), false);
+            if (!r.success) {
+                logger.error("Elevation failed. exit={} stdout={} stderr={}", r.exitCode, r.stdout, r.stderr);
+                showPermissionErrorDialog();
+                return;
             }
 
-            logger.info("Elevation command: powershell {}", psCommand);
-            
-            Process p = new ProcessBuilder("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psCommand)
-                    .start();
-            
-            if (p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) {
-                if (p.exitValue() != 0) {
-                    logger.error("PowerShell failed with exit code: {}", p.exitValue());
-                    JOptionPane.showMessageDialog(null, 
-                        "Failed to request Administrator permission.\nPlease try running the app manually as Administrator.", 
-                        "Fx Shield - Permission Error", 
-                        JOptionPane.WARNING_MESSAGE);
-                    return;
-                }
-            }
-            
             logger.info("Elevation requested. Exiting current process.");
             System.exit(0);
+
         } catch (Exception e) {
             logger.error("Failed to request admin and exit", e);
+            showPermissionErrorDialog();
         }
     }
 
-    private static String getFullCommand() {
-        try {
-            var info = ProcessHandle.current().info();
-            if (info.commandLine().isPresent()) {
-                String cmd = info.commandLine().get();
-                System.out.println("[Admin] Detected command line: " + cmd);
-                if (cmd.endsWith(".exe") && !cmd.contains(File.separator)) {
-                    File exeFile = new File(cmd);
-                    String absolute = exeFile.getAbsolutePath();
-                    System.out.println("[Admin] Resolving relative EXE to: " + absolute);
-                    return absolute;
-                }
-                return cmd;
-            } else if (info.command().isPresent()) {
-                String cmd = info.command().get();
-                System.out.println("[Admin] Detected command: " + cmd);
-                return cmd;
-            }
-        } catch (Exception ignored) {}
+    private static String buildElevationScript(CommandParts parts) {
+        // Start-Process -FilePath 'exe' -ArgumentList @('a','b') -Verb RunAs
+        StringBuilder sb = new StringBuilder();
+        sb.append("Start-Process -FilePath ").append(psSingleQuote(parts.executable)).append(" ");
 
+        if (parts.arguments != null && parts.arguments.length > 0) {
+            sb.append("-ArgumentList @(");
+            for (int i = 0; i < parts.arguments.length; i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(psSingleQuote(parts.arguments[i]));
+            }
+            sb.append(") ");
+        }
+
+        sb.append("-Verb RunAs -WindowStyle Normal");
+        return sb.toString();
+    }
+
+    private static void showPermissionErrorDialog() {
+        try {
+            JOptionPane.showMessageDialog(
+                    null,
+                    "Failed to request Administrator permission.\nPlease try running the app manually as Administrator.",
+                    "Fx Shield - Permission Error",
+                    JOptionPane.WARNING_MESSAGE
+            );
+        } catch (Exception ignored) {}
+    }
+
+    /**
+     * Best-effort: get executable + arguments from ProcessHandle.
+     */
+    private static CommandParts getCurrentProcessCommandParts() {
+        try {
+            ProcessHandle.Info info = ProcessHandle.current().info();
+
+            String exe = null;
+            if (info.command().isPresent()) exe = info.command().get();
+
+            String[] args = null;
+            if (info.arguments().isPresent()) args = info.arguments().get();
+
+            // If we only have commandLine (rare), fallback to simple parse
+            if ((exe == null || exe.isBlank()) && info.commandLine().isPresent()) {
+                return parseCommandLine(info.commandLine().get());
+            }
+
+            // Jar case: if we're running java/javaw, we still want to re-run same args
+            if (exe == null || exe.isBlank()) {
+                return null;
+            }
+
+            CommandParts parts = new CommandParts();
+            parts.executable = exe;
+            parts.arguments = (args != null) ? args : new String[0];
+            return parts;
+
+        } catch (Exception e) {
+            logger.warn("Failed to read current process command parts", e);
+            return parseCommandLine(fallbackCommandLine());
+        }
+    }
+
+    private static String fallbackCommandLine() {
         try {
             String javaHome = System.getProperty("java.home");
             String javaBin = javaHome + File.separator + "bin" + File.separator + "javaw.exe";
-            if (!new File(javaBin).exists()) {
-                javaBin = javaHome + File.separator + "bin" + File.separator + "java.exe";
-            }
+            if (!new File(javaBin).exists()) javaBin = javaHome + File.separator + "bin" + File.separator + "java.exe";
 
-            File loc = new File(WindowsUtils.class.getProtectionDomain()
-                    .getCodeSource().getLocation().toURI());
+            File loc = new File(WindowsUtils.class.getProtectionDomain().getCodeSource().getLocation().toURI());
             String path = loc.getAbsolutePath();
 
             if (path.endsWith(".jar")) {
                 return "\"" + javaBin + "\" -jar \"" + path + "\"";
-            } else if (path.endsWith(".exe")) {
-                return "\"" + path + "\"";
-            } else {
-                String cp = System.getProperty("java.class.path");
-                String mainClass = "fxShield.IMPORTANT.DashBoardPage";
-                return "\"" + javaBin + "\" -cp \"" + cp + "\" " + mainClass;
             }
+            if (path.endsWith(".exe")) {
+                return "\"" + path + "\"";
+            }
+
+            String cp = System.getProperty("java.class.path");
+            String mainClass = "fxShield.UX.DashBoardPage";
+            return "\"" + javaBin + "\" -cp \"" + cp + "\" " + mainClass;
         } catch (Exception e) {
             return null;
         }
     }
 
-    private static final String RUN_KEY = "HKCU:\\\\Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run";
-    private static final String APP_NAME = "FxShield";
+    private static CommandParts parseCommandLine(String cmdLine) {
+        if (cmdLine == null || cmdLine.isBlank()) return null;
 
-    /**
-     * Applies or removes startup registry entry.
-     */
+        // Minimal parser: extract first token as executable, keep rest as one arg-string array
+        String s = cmdLine.trim();
+        String exe;
+        String rest;
+
+        if (s.startsWith("\"")) {
+            int q = s.indexOf("\"", 1);
+            if (q < 0) return null;
+            exe = s.substring(1, q);
+            rest = s.substring(q + 1).trim();
+        } else {
+            int sp = s.indexOf(' ');
+            if (sp < 0) {
+                exe = s;
+                rest = "";
+            } else {
+                exe = s.substring(0, sp);
+                rest = s.substring(sp + 1).trim();
+            }
+        }
+
+        CommandParts p = new CommandParts();
+        p.executable = exe;
+
+        if (rest.isBlank()) {
+            p.arguments = new String[0];
+        } else {
+            // Not perfect, but good fallback: treat remaining as one arg chunk
+            p.arguments = new String[] { rest };
+        }
+        return p;
+    }
+
+    // =========================================================================
+    // Startup Management
+    // =========================================================================
+
     public static void applyStartup(boolean enable) {
         if (!isWindows()) return;
+
         String cmd = startupCommand();
         if (cmd == null || cmd.isBlank()) return;
 
@@ -210,9 +303,6 @@ public final class WindowsUtils {
         else disableStartup();
     }
 
-    /**
-     * Checks if startup is enabled.
-     */
     public static boolean isStartupEnabled() {
         if (!isWindows()) return false;
         String ps = "$p='" + RUN_KEY + "';$n='" + APP_NAME + "';" +
@@ -221,9 +311,6 @@ public final class WindowsUtils {
         return out != null && !out.trim().isEmpty();
     }
 
-    /**
-     * Gets current startup command.
-     */
     public static String currentStartupCommand() {
         if (!isWindows()) return null;
         String ps = "$p='" + RUN_KEY + "';$n='" + APP_NAME + "';" +
@@ -236,239 +323,179 @@ public final class WindowsUtils {
         String value = escapeForPowerShell(cmd);
         String ps =
                 "$p='" + RUN_KEY + "';$n='" + APP_NAME + "';$v='" + value + "';" +
-                "New-Item -Path $p -Force | Out-Null;" +
-                "$cur=(Get-ItemProperty -Path $p -Name $n -ErrorAction SilentlyContinue).$n;" +
-                "if($cur -ne $v){New-ItemProperty -Path $p -Name $n -Value $v -PropertyType String -Force | Out-Null}";
-        runPowerShellSilent(ps, 5);
+                        "New-Item -Path $p -Force | Out-Null;" +
+                        "$cur=(Get-ItemProperty -Path $p -Name $n -ErrorAction SilentlyContinue).$n;" +
+                        "if($cur -ne $v){New-ItemProperty -Path $p -Name $n -Value $v -PropertyType String -Force | Out-Null}";
+        runPowerShellSilent(ps, 6);
     }
 
     private static void disableStartup() {
         String ps = "$p='" + RUN_KEY + "';$n='" + APP_NAME + "';" +
                 "Remove-ItemProperty -Path $p -Name $n -ErrorAction SilentlyContinue;";
-        runPowerShellSilent(ps, 5);
+        runPowerShellSilent(ps, 6);
     }
 
     private static String startupCommand() {
-        try {
-            var info = ProcessHandle.current().info();
-            if (info.commandLine().isPresent()) {
-                String cmd = info.commandLine().get().trim();
-                if (!cmd.contains("--minimized")) {
-                    cmd += " --minimized";
-                }
-                System.out.println("[Startup] Using commandLine: " + cmd);
-                return cmd;
+        CommandParts parts = getCurrentProcessCommandParts();
+        if (parts == null || parts.executable == null || parts.executable.isBlank()) return null;
+
+        // Build a normal command line string for registry
+        String base = quoteCmdArg(parts.executable);
+        StringBuilder sb = new StringBuilder(base);
+
+        if (parts.arguments != null) {
+            for (int i = 0; i < parts.arguments.length; i++) {
+                sb.append(" ").append(quoteCmdArg(parts.arguments[i]));
             }
-        } catch (Exception ignored) {
-            System.out.println("[Startup] commandLine unavailable, fallback");
         }
 
-        String exePath = getAppExePath();
-        if (exePath != null && !exePath.isEmpty()) {
-            return "\"" + exePath + "\" --minimized";
-        }
-        return null;
+        String cmd = sb.toString();
+        if (!cmd.contains("--minimized")) cmd += " --minimized";
+        return cmd;
     }
 
-    private static String getAppExePath() {
-        if (!isWindows()) return null;
-        String ps = "(Get-Process -Id $PID).Path";
-        String out = runPowerShellCapture(ps, 3);
-        return out != null && !out.trim().isEmpty() ? out.trim() : null;
+    private static String quoteCmdArg(String a) {
+        if (a == null) return "\"\"";
+        String s = a;
+        boolean needs = s.contains(" ") || s.contains("\t") || s.contains("\"");
+        if (!needs) return s;
+        s = s.replace("\"", "\\\"");
+        return "\"" + s + "\"";
     }
+
+    // =========================================================================
+    // PowerShell Execution (Robust)
+    // =========================================================================
 
     /**
-     * Runs PowerShell synchronously with live logging of stdout/stderr lines,
-     * 30s timeout. Robust concurrent stream reading prevents blocking.
-     *
-     * @param script PowerShell script
-     * @param logTag log prefix (e.g. "[SFC]")
-     * @return PsResult with exitCode, outputs, timedOut flag
+     * Logged runner: reads stdout/stderr concurrently (no deadlock).
+     * NOTE: Avoid calling from FX thread.
      */
     public static PsResult runPowerShellLogged(String script, String logTag) {
-        if (!isWindows()) {
-            return new PsResult(-1, "", "", false);
-        }
-        if (Platform.isFxApplicationThread()) {
-            System.err.println("[CRITICAL] runPowerShellLogged called on FX thread: " + Thread.currentThread().getName());
-            return new PsResult(-1, "", "FX_THREAD_VIOLATION", false);
-        }
-        Process p = null;
-        StringBuilder outBuilder = new StringBuilder();
-        StringBuilder errBuilder = new StringBuilder();
-        ExecutorService es = Executors.newFixedThreadPool(2);
-        try {
-            ProcessBuilder pb = new ProcessBuilder(
-                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script
-            );
-            p = pb.start();
-            es.submit(new StreamGobbler(p.getInputStream(), logTag + " ", outBuilder));
-            es.submit(new StreamGobbler(p.getErrorStream(), logTag + " [ERR] ", errBuilder));
-            es.shutdownNow();
-            boolean finished = p.waitFor(30, TimeUnit.SECONDS);
-            if (!finished) {
-                p.destroyForcibly();
-                try {
-                    if (p.waitFor(3, TimeUnit.SECONDS)) {
-                        return new PsResult(p.exitValue(), outBuilder.toString(), errBuilder.toString(), true);
-                    } else {
-                        return new PsResult(-1, outBuilder.toString(), errBuilder.toString(), true);
-                    }
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    return new PsResult(-1, outBuilder.toString(), errBuilder.toString(), true);
-                }
-            }
-            int exitCode = p.exitValue();
-            return new PsResult(exitCode, outBuilder.toString(), errBuilder.toString(), false);
-        } catch (Exception ex) {
-            logger.error("Error in runPowerShellLogged", ex);
-            if (p != null) {
-                p.destroyForcibly();
-            }
-            es.shutdownNow();
-            return new PsResult(-1, outBuilder.toString(), errBuilder.toString(), false);
-        }
+        if (!isWindows()) return new PsResult(-1, "", "", false);
+        if (Platform.isFxApplicationThread()) return new PsResult(-1, "", "FX_THREAD_VIOLATION", false);
+
+        String tag = (logTag == null) ? "" : logTag;
+        return runPowerShellInternal(script, DEFAULT_PS_TIMEOUT, true, tag);
     }
 
-    /**
-     * Runs PowerShell silently (no console output), discards streams concurrently to prevent blocking, custom timeout.
-     * Underlying logic shared with runPowerShellLogged.
-     *
-     * @param script the PowerShell script
-     * @param timeoutSec timeout in seconds
-     */
     public static void runPowerShellSilent(String script, long timeoutSec) {
-        if (!isWindows()) {
-            return;
-        }
-        Process p = null;
-        ExecutorService es = Executors.newFixedThreadPool(2);
-        try {
-            ProcessBuilder pb = new ProcessBuilder(
-                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script
-            );
-            p = pb.start();
-            es.submit(new NoPrintGobbler(p.getInputStream(), null));
-            es.submit(new NoPrintGobbler(p.getErrorStream(), null));
-            boolean finished = p.waitFor(timeoutSec, TimeUnit.SECONDS);
-            es.shutdownNow();
-            if (!finished) {
-                p.destroyForcibly();
-                try {
-                    p.waitFor(3, TimeUnit.SECONDS);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-        } catch (Exception ex) {
-            logger.error("Error in runPowerShellSilent", ex);
-            if (p != null) {
-                p.destroyForcibly();
-            }
-        } finally {
-            es.shutdownNow();
-        }
+        if (!isWindows()) return;
+        Duration t = Duration.ofSeconds(Math.max(1, timeoutSec));
+        runPowerShellInternal(script, t, false);
     }
 
-    /**
-     * Runs PowerShell and captures merged stdout+stderr (no console print), custom timeout.
-     * Returns full output; empty on error/timeout.
-     * Underlying logic shared with runPowerShellLogged.
-     *
-     * @param script the PowerShell script
-     * @param timeoutSec timeout in seconds
-     * @return captured output (stdout + stderr)
-     */
     public static String runPowerShellCapture(String script, long timeoutSec) {
-        if (!isWindows()) {
-            return "";
-        }
+        if (!isWindows()) return "";
+        Duration t = Duration.ofSeconds(Math.max(1, timeoutSec));
+        PsResult r = runPowerShellInternal(script, t, false);
+        if (r == null) return "";
+        return (r.stdout + r.stderr);
+    }
+
+    private static PsResult runPowerShellInternal(String script, Duration timeout, boolean logLines) {
+        return runPowerShellInternal(script, timeout, logLines, "");
+    }
+
+    private static PsResult runPowerShellInternal(String script, Duration timeout, boolean logLines, String tag) {
         Process p = null;
-        StringBuilder outBuilder = new StringBuilder();
-        StringBuilder errBuilder = new StringBuilder();
-        ExecutorService es = Executors.newFixedThreadPool(2);
+
+        StringBuilder out = new StringBuilder();
+        StringBuilder err = new StringBuilder();
+
+        Thread tOut = null;
+        Thread tErr = null;
+
         try {
-            ProcessBuilder pb = new ProcessBuilder(
-                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script
-            );
+            ProcessBuilder pb = psEncoded(script);
             p = pb.start();
-            es.submit(new NoPrintGobbler(p.getInputStream(), outBuilder));
-            es.submit(new NoPrintGobbler(p.getErrorStream(), errBuilder));
-            boolean finished = p.waitFor(timeoutSec, TimeUnit.SECONDS);
-            es.shutdownNow();
+
+            final Process proc = p;
+
+            tOut = new Thread(new Gobbler(proc.getInputStream(), out, logLines ? (tag + " ") : null), "fxShield-ps-out");
+            tErr = new Thread(new Gobbler(proc.getErrorStream(), err, logLines ? (tag + " [ERR] ") : null), "fxShield-ps-err");
+
+            tOut.setDaemon(true);
+            tErr.setDaemon(true);
+
+            tOut.start();
+            tErr.start();
+
+            boolean finished = proc.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
             if (!finished) {
-                p.destroyForcibly();
-                try {
-                    p.waitFor(3, TimeUnit.SECONDS);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                }
+                safeDestroy(proc);
+                joinQuiet(tOut, 1200);
+                joinQuiet(tErr, 1200);
+                return new PsResult(-1, out.toString(), err.toString(), true);
             }
-            return outBuilder.toString() + errBuilder.toString();
+
+            joinQuiet(tOut, 1200);
+            joinQuiet(tErr, 1200);
+
+            int code = proc.exitValue();
+            return new PsResult(code, out.toString(), err.toString(), false);
+
         } catch (Exception ex) {
-            logger.error("Error in runPowerShellCapture", ex);
-            if (p != null) {
+            logger.error("PowerShell execution failed", ex);
+            if (p != null) safeDestroy(p);
+            joinQuiet(tOut, 800);
+            joinQuiet(tErr, 800);
+            return new PsResult(-1, out.toString(), err.toString(), false);
+        }
+    }
+
+    private static void safeDestroy(Process p) {
+        try { p.destroy(); } catch (Exception ignored) {}
+        try {
+            if (!p.waitFor(400, TimeUnit.MILLISECONDS)) {
                 p.destroyForcibly();
+                p.waitFor(400, TimeUnit.MILLISECONDS);
             }
-            return "";
-        } finally {
-            es.shutdownNow();
+        } catch (Exception ignored) {
+            try { p.destroyForcibly(); } catch (Exception ignored2) {}
         }
     }
 
-    private static class StreamGobbler implements Runnable {
-        private final InputStream inputStream;
+    private static void joinQuiet(Thread t, long ms) {
+        if (t == null) return;
+        try { t.join(ms); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+    }
+
+    private static final class Gobbler implements Runnable {
+        private final InputStream is;
+        private final StringBuilder sink;
         private final String prefix;
-        private final StringBuilder builder;
 
-        StreamGobbler(InputStream is, String prefix, StringBuilder builder) {
-            this.inputStream = is;
+        Gobbler(InputStream is, StringBuilder sink, String prefix) {
+            this.is = is;
+            this.sink = sink;
             this.prefix = prefix;
-            this.builder = builder;
         }
 
         @Override
         public void run() {
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
+            try (BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
                 String line;
-                while ((line = reader.readLine()) != null) {
-                    System.out.println(prefix + line);
-                    synchronized (builder) {
-                        builder.append(line).append("\n");
+                while ((line = br.readLine()) != null) {
+                    synchronized (sink) {
+                        sink.append(line).append('\n');
+                    }
+                    if (prefix != null) {
+                        logger.info("{}{}", prefix, line);
                     }
                 }
-            } catch (IOException ignored) {
-                // Normal on process destroy
+            } catch (Exception ignored) {
+                // Normal during process kill
             }
         }
     }
 
-    private static class NoPrintGobbler implements Runnable {
-        private final InputStream inputStream;
-        private final StringBuilder builder;
+    // =========================================================================
+    // Helpers
+    // =========================================================================
 
-        NoPrintGobbler(InputStream is, StringBuilder builder) {
-            this.inputStream = is;
-            this.builder = builder;
-        }
-
-        @Override
-        public void run() {
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    if (builder != null) {
-                        synchronized (builder) {
-                            builder.append(line).append("\n");
-                        }
-                    }
-                }
-            } catch (IOException ignored) {
-                // Normal on process destroy
-            }
-        }
+    private static final class CommandParts {
+        String executable;
+        String[] arguments;
     }
 }

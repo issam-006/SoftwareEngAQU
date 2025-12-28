@@ -26,26 +26,49 @@ public final class GPUStabilizer {
 
     // Core update
     public synchronized int update(int raw, long nowMs) {
-        if (raw < 0) { // failed sample
-            if (stable >= 0 && (nowMs - lastGoodMs) <= failGraceMs) {
-                return stable; // hold during grace window
+
+        // ----- Failed sample -----
+        if (raw < 0) {
+            // hold last good within grace window
+            if (stable >= 0 && lastGoodMs > 0 && (nowMs - lastGoodMs) <= failGraceMs) {
+                return stable;
             }
-            return stable; // keep unsupported or last known
+
+            // grace expired => drop to unsupported (so it doesn't freeze forever)
+            if (stable >= 0 && (nowMs - lastGoodMs) > failGraceMs) {
+                stable = unsupportedValue;
+            }
+            return stable;
         }
 
+        // ----- Valid sample -----
         raw = clampInt(raw, 0, 100);
-        lastGoodMs = nowMs;
 
+        // Handle zeros carefully (common false readings)
         if (raw == 0) {
             zeroStreak++;
-            if (stable > 0 && zeroStreak < zeroConfirm) {
-                return stable; // ignore brief zero dips
+
+            // If we are already at 0, accept immediately and refresh lastGoodMs
+            if (stable == 0) {
+                lastGoodMs = nowMs;
+                return stable;
             }
+
+            // Require consecutive zeros before accepting 0
+            if (zeroStreak < zeroConfirm) {
+                // do NOT refresh lastGoodMs here (so repeated fake zeros won't extend grace)
+                return stable;
+            }
+
+            // Now we accept 0 as real
+            lastGoodMs = nowMs;
             stable = smooth(stable, 0);
             return stable;
         }
 
+        // Non-zero valid value
         zeroStreak = 0;
+        lastGoodMs = nowMs;
         stable = smooth(stable, raw);
         return stable;
     }
@@ -63,10 +86,11 @@ public final class GPUStabilizer {
     }
 
     private int smooth(int prev, int next) {
-        if (prev < 0) return next; // first valid sample
+        // first valid sample
+        if (prev < 0) return next;
+
         double v = prev + alpha * (next - prev);
-        // clamp after rounding to avoid drift outside bounds
-        return clampInt((int)Math.round(v), 0, 100);
+        return clampInt((int) Math.round(v), 0, 100);
     }
 
     private static int clampInt(int v, int min, int max) {

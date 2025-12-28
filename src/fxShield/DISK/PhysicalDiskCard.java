@@ -10,6 +10,7 @@ import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
 import javafx.scene.layout.*;
 import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
 
 import java.text.DecimalFormat;
 import java.util.Locale;
@@ -17,13 +18,6 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
-/**
- * Card that displays physical disk info with usage + active bars.
- * Optimizations:
- * - Idempotent compact apply (won't re-apply on same state)
- * - Cached fonts (no Font.font allocations on toggles)
- * - Switcher width update unified
- */
 public final class PhysicalDiskCard extends BaseCard {
 
     private static final Map<String, String> DISK_TYPE_CACHE = new ConcurrentHashMap<>();
@@ -44,20 +38,16 @@ public final class PhysicalDiskCard extends BaseCard {
     private static final DecimalFormat SIZE_FORMAT = new DecimalFormat("0.0");
     private static final String FONT_UI = "Segoe UI";
 
-    // ✅ cache fonts (important)
-    private static final Font TITLE_REG   = Font.font(FONT_UI, 20);
-    private static final Font USED_REG    = Font.font(FONT_UI, 17);
-    private static final Font ACTIVE_REG  = Font.font(FONT_UI, 17);
-    private static final Font SPACE_REG   = Font.font(FONT_UI, 13);
+    // cached fonts (no CSS font-weight)
+    private static final Font TITLE_REG   = Font.font(FONT_UI, FontWeight.BOLD, 20);
+    private static final Font USED_REG    = Font.font(FONT_UI, FontWeight.NORMAL, 17);
+    private static final Font ACTIVE_REG  = Font.font(FONT_UI, FontWeight.NORMAL, 17);
+    private static final Font SPACE_REG   = Font.font(FONT_UI, FontWeight.NORMAL, 13);
 
-    private static final Font TITLE_COMP  = Font.font(FONT_UI, 15);
-    private static final Font USED_COMP   = Font.font(FONT_UI, 14);
-    private static final Font ACTIVE_COMP = Font.font(FONT_UI, 14);
-    private static final Font SPACE_COMP  = Font.font(FONT_UI, 11);
-
-    // ✅ cache insets too
-    private static final Insets PAD_REG = new Insets(22);
-    private static final Insets PAD_COMP = new Insets(12);
+    private static final Font TITLE_COMP  = Font.font(FONT_UI, FontWeight.BOLD, 15);
+    private static final Font USED_COMP   = Font.font(FONT_UI, FontWeight.NORMAL, 14);
+    private static final Font ACTIVE_COMP = Font.font(FONT_UI, FontWeight.NORMAL, 14);
+    private static final Font SPACE_COMP  = Font.font(FONT_UI, FontWeight.NORMAL, 11);
 
     private final StackPane root;
     private final VBox content;
@@ -76,17 +66,17 @@ public final class PhysicalDiskCard extends BaseCard {
     private final ColumnConstraints col2;
 
     private Node switcherNode;
+    private boolean compact;
 
-    // ✅ compact gating (nullable => first call always applies)
-    private Boolean compactState = null;
+    // overrides (separated to avoid “sticky” wrong type)
+    private String manualTypeOverride; // set by UI / user
+    private String snapTypeOverride;   // set from snapshot (if provided)
 
-    private String typeOverride;
-
-    public PhysicalDiskCard(int index, String model, double sizeGb) {
+    public PhysicalDiskCard(int indexZeroBased, String model, double sizeGb) {
 
         titleLabel = new Label();
         titleLabel.setTextFill(colorFromHex(COLOR_TEXT_MEDIUM));
-        titleLabel.setStyle("-fx-font-weight: bold;");
+        titleLabel.setFont(TITLE_REG);
         titleLabel.setAlignment(Pos.CENTER);
         titleLabel.setMinWidth(0);
         titleLabel.setMaxWidth(Double.MAX_VALUE);
@@ -114,6 +104,7 @@ public final class PhysicalDiskCard extends BaseCard {
         usedValueLabel.setAlignment(Pos.CENTER);
         usedValueLabel.setMaxWidth(Double.MAX_VALUE);
         usedValueLabel.setTextFill(colorFromHex(COLOR_TEXT_LIGHT));
+        usedValueLabel.setFont(USED_REG);
 
         usedBar = new ProgressBar(0);
         makeBarFullWidth(usedBar);
@@ -123,18 +114,20 @@ public final class PhysicalDiskCard extends BaseCard {
         spaceLabel.setAlignment(Pos.CENTER);
         spaceLabel.setMaxWidth(Double.MAX_VALUE);
         spaceLabel.setTextFill(colorFromHex(COLOR_TEXT_DIM));
+        spaceLabel.setFont(SPACE_REG);
 
         activeValueLabel = new Label("Active: 0 %");
         activeValueLabel.setAlignment(Pos.CENTER);
         activeValueLabel.setMaxWidth(Double.MAX_VALUE);
         activeValueLabel.setTextFill(colorFromHex(COLOR_TEXT_LIGHT));
+        activeValueLabel.setFont(ACTIVE_REG);
 
         activeBar = new ProgressBar(0);
         makeBarFullWidth(activeBar);
         setBarAccentColor(activeBar, COLOR_INFO);
 
         content = new VBox(14);
-        content.setPadding(PAD_REG);
+        content.setPadding(new Insets(22));
         content.setAlignment(Pos.TOP_CENTER);
         content.setStyle(CARD_STYLE);
         content.setMaxWidth(520);
@@ -150,23 +143,11 @@ public final class PhysicalDiskCard extends BaseCard {
 
         root = new StackPane(content);
         root.setMaxWidth(520);
-        watchFont(titleLabel, "DiskCard.title");
-        watchFont(usedValueLabel, "DiskCard.usedValue");
-        watchFont(spaceLabel, "DiskCard.space");
-        watchFont(activeValueLabel, "DiskCard.activeValue");
-        watchScale(root, "DiskCard.root");
 
-        // apply initial sizing/fonts
         setCompact(false);
-
-        // set initial labels
-        setDiskInfo(index, model, sizeGb);
+        setDiskInfo(indexZeroBased, model, sizeGb);
     }
 
-    /**
-     * Put diskSwitcher.getRoot() here.
-     * Appears on the left of the header while title stays centered.
-     */
     public void setSwitcherNode(Node node) {
         if (switcherNode != null) headerGrid.getChildren().remove(switcherNode);
         switcherNode = node;
@@ -182,11 +163,10 @@ public final class PhysicalDiskCard extends BaseCard {
         updateSwitcherColumns();
     }
 
-    // ===== Public API =====
-
-    public void setDiskInfo(int index, String model, double sizeGb) {
+    public void setDiskInfo(int indexZeroBased, String model, double sizeGb) {
+        snapTypeOverride = null; // reset snapshot override when manually setting base info
         String diskType = resolveDiskType(model);
-        titleLabel.setText("Disk " + index + " • " + diskType);
+        titleLabel.setText(diskTitle(indexZeroBased) + " • " + diskType);
         spaceLabel.setText("Size: " + SIZE_FORMAT.format(sizeGb) + " GB");
     }
 
@@ -195,6 +175,7 @@ public final class PhysicalDiskCard extends BaseCard {
                            DecimalFormat gbFormat) {
 
         if (snap == null) {
+            snapTypeOverride = null;
             usedValueLabel.setText("Used: N/A");
             usedBar.setProgress(0);
             activeValueLabel.setText("Active: N/A");
@@ -202,24 +183,27 @@ public final class PhysicalDiskCard extends BaseCard {
             return;
         }
 
-        if (snap.typeLabel != null && !snap.typeLabel.isBlank()) {
-            typeOverride = snap.typeLabel;
-        }
+        // keep snapshot override ONLY for this snapshot (no sticky old type)
+        if (snap.typeLabel != null && !snap.typeLabel.isBlank()) snapTypeOverride = snap.typeLabel;
+        else snapTypeOverride = null;
 
         String diskType = resolveDiskType(snap.model);
-        titleLabel.setText("Disk " + snap.index + " • " + diskType);
+        titleLabel.setText(diskTitle(snap.index) + " • " + diskType);
+
+        DecimalFormat pf = (percentFormat != null) ? percentFormat : new DecimalFormat("0");
+        DecimalFormat gf = (gbFormat != null) ? gbFormat : new DecimalFormat("0.0");
 
         if (snap.hasUsage) {
-            usedValueLabel.setText("Used: " + percentFormat.format(snap.usedPercent) + " %");
+            usedValueLabel.setText("Used: " + pf.format(snap.usedPercent) + " %");
             usedBar.setProgress(clamp01(snap.usedPercent / 100.0));
-            spaceLabel.setText(gbFormat.format(snap.usedGb) + " / " + gbFormat.format(snap.totalGb) + " GB");
+            spaceLabel.setText(gf.format(snap.usedGb) + " / " + gf.format(snap.totalGb) + " GB");
         } else {
             usedValueLabel.setText("Used: N/A");
             usedBar.setProgress(0);
-            spaceLabel.setText("Size: " + gbFormat.format(snap.sizeGb) + " GB");
+            spaceLabel.setText("Size: " + gf.format(snap.sizeGb) + " GB");
         }
 
-        activeValueLabel.setText("Active: " + percentFormat.format(snap.activePercent) + " %");
+        activeValueLabel.setText("Active: " + pf.format(snap.activePercent) + " %");
         activeBar.setProgress(clamp01(snap.activePercent / 100.0));
     }
 
@@ -228,16 +212,9 @@ public final class PhysicalDiskCard extends BaseCard {
 
     @Override
     public void setCompact(boolean compact) {
-        // ✅ idempotent
-        if (compactState != null && compactState == compact) return;
-
-        compactState = compact;
-
-        debugCompact("PhysicalDiskCard", compact);
-
+        this.compact = compact;
         if (compact) applyCompact();
         else applyRegular();
-
         updateSwitcherColumns();
     }
 
@@ -247,15 +224,13 @@ public final class PhysicalDiskCard extends BaseCard {
     public ProgressBar getUsedBar() { return usedBar; }
     public ProgressBar getActiveBar() { return activeBar; }
 
-    // ===== UI helpers =====
-
     private void applyCompact() {
         titleLabel.setFont(TITLE_COMP);
         usedValueLabel.setFont(USED_COMP);
         activeValueLabel.setFont(ACTIVE_COMP);
         spaceLabel.setFont(SPACE_COMP);
 
-        content.setPadding(PAD_COMP);
+        content.setPadding(new Insets(12));
         content.setSpacing(8);
         content.setMinWidth(200);
         content.setPrefWidth(240);
@@ -272,7 +247,7 @@ public final class PhysicalDiskCard extends BaseCard {
         activeValueLabel.setFont(ACTIVE_REG);
         spaceLabel.setFont(SPACE_REG);
 
-        content.setPadding(PAD_REG);
+        content.setPadding(new Insets(22));
         content.setSpacing(14);
         content.setMinWidth(280);
         content.setPrefWidth(320);
@@ -284,8 +259,7 @@ public final class PhysicalDiskCard extends BaseCard {
     }
 
     private void updateSwitcherColumns() {
-        boolean isCompact = Boolean.TRUE.equals(compactState);
-        double w = (switcherNode == null) ? 0 : (isCompact ? 62 : 85);
+        double w = (switcherNode == null) ? 0 : (compact ? 62 : 85);
 
         col0.setPrefWidth(w);
         col2.setPrefWidth(w);
@@ -305,22 +279,30 @@ public final class PhysicalDiskCard extends BaseCard {
         VBox.setVgrow(bar, Priority.NEVER);
     }
 
-    // ===== Disk type resolution =====
-
     private String resolveDiskType(String model) {
-        if (typeOverride != null && !typeOverride.isBlank()) return normalizeType(typeOverride);
+        if (manualTypeOverride != null && !manualTypeOverride.isBlank()) return normalizeType(manualTypeOverride);
+        if (snapTypeOverride != null && !snapTypeOverride.isBlank()) return normalizeType(snapTypeOverride);
         return detectDiskType(model);
     }
 
     public void setDiskTypeOverride(String type) {
-        this.typeOverride = type;
+        this.manualTypeOverride = type;
     }
 
     private static String normalizeType(String t) {
         if (t == null) return "Disk";
         String v = t.trim();
+        if (v.isEmpty()) return "Disk";
+
+        if (v.equalsIgnoreCase("nvme")) return "NVMe";
         if (v.equalsIgnoreCase("solid state drive") || v.equalsIgnoreCase("solidstate")) return "SSD";
         if (v.equalsIgnoreCase("hard disk drive") || v.equalsIgnoreCase("harddisk")) return "HDD";
+        if (v.equalsIgnoreCase("hdd")) return "HDD";
+        if (v.equalsIgnoreCase("ssd")) return "SSD";
+
+        // keep a nice casing for NVMe-like strings
+        if (v.equalsIgnoreCase("nvme ssd") || v.equalsIgnoreCase("m.2 nvme")) return "NVMe";
+
         return v.toUpperCase(Locale.ROOT);
     }
 
@@ -333,6 +315,8 @@ public final class PhysicalDiskCard extends BaseCard {
     }
 
     private static String computeDiskType(String m) {
+        if (m == null || m.isBlank()) return "Disk";
+
         if (NVME_PATTERN.matcher(m).find() || (M2_PATTERN.matcher(m).find() && m.contains("nvme"))) return "NVMe";
         if (SSD_PATTERN.matcher(m).find() || M2_PATTERN.matcher(m).find()) return "SSD";
 
@@ -356,5 +340,16 @@ public final class PhysicalDiskCard extends BaseCard {
         }
 
         return "Disk";
+    }
+
+    private static String diskTitle(int indexZeroBased) {
+        int shown = Math.max(0, indexZeroBased) + 1; // UI: 1-based
+        return "Disk " + shown;
+    }
+
+    public static double clamp01(double v) {
+        if (v < 0) return 0;
+        if (v > 1) return 1;
+        return v;
     }
 }

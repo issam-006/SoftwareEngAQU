@@ -1,6 +1,9 @@
 package fxShield.UI;
 
-import javafx.animation.*;
+import javafx.animation.FadeTransition;
+import javafx.animation.Interpolator;
+import javafx.animation.ParallelTransition;
+import javafx.animation.ScaleTransition;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
@@ -10,27 +13,42 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
+import javafx.scene.shape.SVGPath;
 import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.util.Duration;
-import javafx.scene.shape.SVGPath;
 
 import java.util.prefs.Preferences;
+import java.util.function.Consumer;
 
 public final class PowerModeDialog {
 
+    private PowerModeDialog() {}
+
     private enum PowerMode { PERFORMANCE, BALANCED, QUIET }
 
-    private static final String PREF_NODE = "fxshield";
     private static final String PREF_KEY_POWER_MODE = "powerMode";
 
-    // Styles
+    // ===== Fonts (avoid CSS font-weight bugs) =====
+    private static final Font FONT_TITLE = Font.font("Segoe UI", FontWeight.EXTRA_BOLD, 18);
+    private static final Font FONT_SUB   = Font.font("Segoe UI", FontWeight.NORMAL, 12);
+    private static final Font FONT_BTN   = Font.font("Segoe UI", FontWeight.SEMI_BOLD, 12);
+
+    private static final Font FONT_CARD_TITLE = Font.font("Segoe UI", FontWeight.BOLD, 14);
+    private static final Font FONT_CARD_DESC  = Font.font("Segoe UI", FontWeight.NORMAL, 11);
+    private static final Font FONT_RADIO      = Font.font("Segoe UI", FontWeight.BOLD, 16);
+
+    // ===== Dialog Styles =====
     private static final String DIALOG_ROOT_STYLE =
-            "-fx-background-color: #020617;" +
+            "-fx-background-color: rgba(2,6,23,0.98);" +
                     "-fx-background-radius: 18;" +
-                    "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.6), 24, 0.2, 0, 10);";
+                    "-fx-border-radius: 18;" +
+                    "-fx-border-color: rgba(255,255,255,0.10);" +
+                    "-fx-border-width: 1;" +
+                    "-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.65), 26, 0.22, 0, 12);";
 
     private static final String BTN_CANCEL_NORMAL =
             "-fx-background-color: transparent;" +
@@ -41,8 +59,9 @@ public final class PowerModeDialog {
                     "-fx-border-radius: 999;" +
                     "-fx-padding: 4 18 4 18;" +
                     "-fx-cursor: hand;";
+
     private static final String BTN_CANCEL_HOVER =
-            "-fx-background-color: #1f2937;" +
+            "-fx-background-color: rgba(255,255,255,0.06);" +
                     "-fx-text-fill: #e5e7eb;" +
                     "-fx-border-color: #6b7280;" +
                     "-fx-border-width: 1.2;" +
@@ -56,37 +75,56 @@ public final class PowerModeDialog {
                     "-fx-text-fill: white;" +
                     "-fx-background-radius: 999;" +
                     "-fx-padding: 4 22 4 22;" +
-                    "-fx-cursor: hand;";
+                    "-fx-cursor: hand;" +
+                    "-fx-effect: dropshadow(gaussian, rgba(37,99,235,0.30), 16, 0.18, 0, 0);";
+
     private static final String BTN_APPLY_HOVER =
             "-fx-background-color: #1d4ed8;" +
                     "-fx-text-fill: white;" +
                     "-fx-background-radius: 999;" +
                     "-fx-padding: 4 22 4 22;" +
-                    "-fx-cursor: hand;";
+                    "-fx-cursor: hand;" +
+                    "-fx-effect: dropshadow(gaussian, rgba(37,99,235,0.40), 18, 0.20, 0, 0);";
 
+    // ===== Cards =====
     private static final String CARD_BASE =
-            "-fx-background-color: #020617;" +
-                    "-fx-background-radius: 16;";
-    private static final String CARD_HOVER =
-            CARD_BASE +
-                    "-fx-border-color: #1f2937;" +
-                    "-fx-border-radius: 16;";
-    private static final String CARD_SELECTED =
-            CARD_BASE +
-                    "-fx-border-color: #3b82f6;" +
-                    "-fx-border-width: 1.6;" +
-                    "-fx-border-radius: 16;";
+            "-fx-background-color: rgba(255,255,255,0.03);" +
+                    "-fx-background-radius: 16;" +
+                    "-fx-border-radius: 16;" +
+                    "-fx-border-color: rgba(255,255,255,0.06);" +
+                    "-fx-border-width: 1;";
 
-    private static final String ICON_STYLE = "-fx-fill: none; -fx-stroke: rgba(147,197,253,0.9); -fx-stroke-width: 2; -fx-stroke-linecap: round; -fx-stroke-linejoin: round;";
-    private static final String ICON_SELECTED_STYLE = "-fx-fill: none; -fx-stroke: #3b82f6; -fx-stroke-width: 2.2; -fx-stroke-linecap: round; -fx-stroke-linejoin: round;";
+    private static final String CARD_HOVER =
+            "-fx-background-color: rgba(255,255,255,0.05);" +
+                    "-fx-background-radius: 16;" +
+                    "-fx-border-radius: 16;" +
+                    "-fx-border-color: rgba(255,255,255,0.10);" +
+                    "-fx-border-width: 1;";
+
+    private static final String CARD_SELECTED =
+            "-fx-background-color: rgba(255,255,255,0.04);" +
+                    "-fx-background-radius: 16;" +
+                    "-fx-border-radius: 16;" +
+                    "-fx-border-color: rgba(59,130,246,0.95);" +
+                    "-fx-border-width: 1.6;" +
+                    "-fx-effect: dropshadow(gaussian, rgba(59,130,246,0.20), 16, 0.18, 0, 0);";
+
+    private static final String ICON_STYLE =
+            "-fx-fill: none; -fx-stroke: rgba(147,197,253,0.90); -fx-stroke-width: 2;" +
+                    "-fx-stroke-linecap: round; -fx-stroke-linejoin: round;";
+
+    private static final String ICON_SELECTED_STYLE =
+            "-fx-fill: none; -fx-stroke: #3b82f6; -fx-stroke-width: 2.2;" +
+                    "-fx-stroke-linecap: round; -fx-stroke-linejoin: round;";
 
     public static void show(Stage owner) {
         PowerMode currentMode = loadSavedMode();
 
         Stage dialog = new Stage();
-        dialog.initOwner(owner);
+        if (owner != null) dialog.initOwner(owner);
         dialog.initModality(Modality.APPLICATION_MODAL);
         dialog.initStyle(StageStyle.TRANSPARENT);
+        dialog.setResizable(false);
         dialog.setTitle("Power Mode Setting");
 
         BorderPane root = new BorderPane();
@@ -100,27 +138,31 @@ public final class PowerModeDialog {
         clip.heightProperty().bind(root.heightProperty());
         root.setClip(clip);
 
-        // Header
+        // ===== Header =====
         Label title = new Label("Power Mode Setting");
-        title.setFont(Font.font("Segoe UI", 18));
+        title.setFont(FONT_TITLE);
         title.setTextFill(Color.web("#e5e7eb"));
-        title.setStyle("-fx-font-weight: bold;");
 
         Label sub = new Label("Choose the mode you want to use.");
-        sub.setFont(Font.font("Segoe UI", 12));
+        sub.setFont(FONT_SUB);
         sub.setTextFill(Color.web("#9ca3af"));
+
         VBox titleBox = new VBox(4, title, sub);
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
         Button cancelBtn = new Button("Cancel");
+        cancelBtn.setFont(FONT_BTN);
+        cancelBtn.setCancelButton(true);
         cancelBtn.setStyle(BTN_CANCEL_NORMAL);
         cancelBtn.setOnMouseEntered(e -> cancelBtn.setStyle(BTN_CANCEL_HOVER));
         cancelBtn.setOnMouseExited(e -> cancelBtn.setStyle(BTN_CANCEL_NORMAL));
         cancelBtn.setOnAction(e -> dialog.close());
 
         Button applyBtn = new Button("Apply");
+        applyBtn.setFont(FONT_BTN);
+        applyBtn.setDefaultButton(true);
         applyBtn.setStyle(BTN_APPLY_NORMAL);
         applyBtn.setOnMouseEntered(e -> applyBtn.setStyle(BTN_APPLY_HOVER));
         applyBtn.setOnMouseExited(e -> applyBtn.setStyle(BTN_APPLY_NORMAL));
@@ -129,25 +171,53 @@ public final class PowerModeDialog {
         header.setAlignment(Pos.CENTER_LEFT);
         root.setTop(header);
 
-        // Cards
-        ModeCard performance = new ModeCard("Performance Mode",
-                "Boost your computer performance with higher power consumption.", PowerMode.PERFORMANCE);
-        ModeCard balanced = new ModeCard("Balanced Mode",
-                "Automatically adjust performance and power usage.", PowerMode.BALANCED);
-        ModeCard quiet = new ModeCard("Quiet Mode",
-                "Reduce noise and power usage with lower performance.", PowerMode.QUIET);
+        // ===== Cards =====
+        ModeCard performance = new ModeCard(
+                "Performance Mode",
+                "Boost your computer performance with higher power consumption.",
+                PowerMode.PERFORMANCE
+        );
 
-        ModeCard[] cards = {performance, balanced, quiet};
+        ModeCard balanced = new ModeCard(
+                "Balanced Mode",
+                "Automatically adjust performance and power usage.",
+                PowerMode.BALANCED
+        );
+
+        ModeCard quiet = new ModeCard(
+                "Quiet Mode",
+                "Reduce noise and power usage with lower performance.",
+                PowerMode.QUIET
+        );
+
+        ModeCard[] cards = { performance, balanced, quiet };
+
+        // unified selector (fixes keyboard + mouse selection)
+        Consumer<ModeCard> select = sel -> setSelected(cards, sel);
+
+        for (ModeCard c : cards) {
+            c.setOnSelect(select);
+
+            c.setOnMouseClicked(e -> {
+                select.accept(c);
+                c.requestFocus();
+            });
+
+            c.setOnMouseEntered(e -> {
+                if (!c.isSelected()) c.setStyle(CARD_HOVER);
+            });
+
+            c.setOnMouseExited(e -> {
+                if (!c.isSelected()) c.setStyle(CARD_BASE);
+            });
+        }
+
+        // apply initial selection
         for (ModeCard c : cards) {
             if (c.mode == currentMode) {
-                setSelected(cards, c);
+                select.accept(c);
                 break;
             }
-        }
-        for (ModeCard card : cards) {
-            card.setOnMouseClicked(e -> setSelected(cards, card));
-            card.setOnMouseEntered(e -> { if (!card.isSelected()) card.setStyle(CARD_HOVER); });
-            card.setOnMouseExited(e -> { if (!card.isSelected()) card.setStyle(CARD_BASE); });
         }
 
         VBox modesBox = new VBox(12, performance, balanced, quiet);
@@ -157,26 +227,27 @@ public final class PowerModeDialog {
         // Apply action persists current selection
         applyBtn.setOnAction(e -> {
             ModeCard selected = getSelected(cards);
-            if (selected != null) {
-                saveMode(selected.mode);
-            }
+            if (selected != null) saveMode(selected.mode);
             dialog.close();
         });
 
-        // Scene and keyboard handling
+        // ===== Scene + keyboard =====
         Scene scene = new Scene(root, 700, 390);
         scene.setFill(Color.TRANSPARENT);
+
         scene.setOnKeyPressed(k -> {
             if (k.getCode() == KeyCode.ESCAPE) dialog.close();
             if (k.getCode() == KeyCode.ENTER) applyBtn.fire();
-            if (k.getCode() == KeyCode.DIGIT1 || k.getCode() == KeyCode.NUMPAD1) setSelected(cards, performance);
-            if (k.getCode() == KeyCode.DIGIT2 || k.getCode() == KeyCode.NUMPAD2) setSelected(cards, balanced);
-            if (k.getCode() == KeyCode.DIGIT3 || k.getCode() == KeyCode.NUMPAD3) setSelected(cards, quiet);
+
+            if (k.getCode() == KeyCode.DIGIT1 || k.getCode() == KeyCode.NUMPAD1) select.accept(performance);
+            if (k.getCode() == KeyCode.DIGIT2 || k.getCode() == KeyCode.NUMPAD2) select.accept(balanced);
+            if (k.getCode() == KeyCode.DIGIT3 || k.getCode() == KeyCode.NUMPAD3) select.accept(quiet);
         });
+
         dialog.setScene(scene);
         dialog.centerOnScreen();
 
-        // Pop-in animation
+        // ===== Pop-in animation =====
         root.setOpacity(0);
         root.setScaleX(0.95);
         root.setScaleY(0.95);
@@ -200,7 +271,7 @@ public final class PowerModeDialog {
     }
 
     private static Preferences prefs() {
-        return Preferences.userRoot().node(PREF_NODE);
+        return Preferences.userNodeForPackage(PowerModeDialog.class);
     }
 
     private static PowerMode loadSavedMode() {
@@ -215,14 +286,17 @@ public final class PowerModeDialog {
 
     private static FadeTransition fade(Region node, double from, double to, int ms) {
         FadeTransition ft = new FadeTransition(Duration.millis(ms), node);
-        ft.setFromValue(from); ft.setToValue(to);
+        ft.setFromValue(from);
+        ft.setToValue(to);
         return ft;
     }
 
     private static ScaleTransition scale(Region node, double from, double to, int ms) {
         ScaleTransition st = new ScaleTransition(Duration.millis(ms), node);
-        st.setFromX(from); st.setFromY(from);
-        st.setToX(to);     st.setToY(to);
+        st.setFromX(from);
+        st.setFromY(from);
+        st.setToX(to);
+        st.setToY(to);
         return st;
     }
 
@@ -237,58 +311,64 @@ public final class PowerModeDialog {
     private static final class ModeCard extends VBox {
         private final Label radio = new Label("○");
         private final Label title = new Label();
-        private final Label desc = new Label();
-        private boolean selected = false;
+        private final Label desc  = new Label();
         private final SVGPath icon;
+        private boolean selected = false;
+
+        private Consumer<ModeCard> onSelect;
         private final PowerMode mode;
 
         ModeCard(String titleText, String descText, PowerMode mode) {
             this.mode = mode;
+
             setSpacing(8);
             setPadding(new Insets(14));
             setAlignment(Pos.TOP_LEFT);
             setStyle(CARD_BASE);
             setFocusTraversable(true);
 
-            radio.setFont(Font.font("Segoe UI", 16));
+            radio.setFont(FONT_RADIO);
             radio.setTextFill(Color.web("#9ca3af"));
 
             title.setText(titleText);
-            title.setFont(Font.font("Segoe UI", 14));
+            title.setFont(FONT_CARD_TITLE);
             title.setTextFill(Color.web("#e5e7eb"));
-            title.setStyle("-fx-font-weight: bold;");
 
             desc.setText(descText);
-            desc.setFont(Font.font("Segoe UI", 11));
+            desc.setFont(FONT_CARD_DESC);
             desc.setTextFill(Color.web("#9ca3af"));
             desc.setWrapText(true);
-            
+
             this.icon = new SVGPath();
             this.icon.setContent(modeIconPath(mode));
             this.icon.setStyle(ICON_STYLE);
-            
+
             StackPane iconPane = new StackPane(icon);
             iconPane.setPrefSize(36, 36);
             iconPane.setMaxSize(36, 36);
             iconPane.setPadding(new Insets(4));
-            
+
             HBox header = new HBox(12, iconPane, radio, title);
             header.setAlignment(Pos.CENTER_LEFT);
 
             getChildren().addAll(header, desc);
 
-            // Keyboard toggle
+            // keyboard select (FIX: selects through dialog selector, not local)
             setOnKeyPressed(e -> {
                 if (e.getCode() == KeyCode.SPACE || e.getCode() == KeyCode.ENTER) {
-                    // parent container will reset others
-                    requestFocus();
-                    setSelected(true);
+                    if (onSelect != null) onSelect.accept(this);
+                    e.consume();
                 }
             });
         }
 
+        void setOnSelect(Consumer<ModeCard> onSelect) {
+            this.onSelect = onSelect;
+        }
+
         void setSelected(boolean sel) {
             selected = sel;
+
             if (sel) {
                 radio.setText("●");
                 radio.setTextFill(Color.web("#3b82f6"));
@@ -303,6 +383,5 @@ public final class PowerModeDialog {
         }
 
         boolean isSelected() { return selected; }
-        String getTitleText() { return title.getText(); }
     }
 }

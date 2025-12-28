@@ -6,6 +6,7 @@ import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.geometry.Rectangle2D;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
@@ -13,13 +14,12 @@ import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
 import javafx.stage.Modality;
+import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import javafx.util.Duration;
-
-import javafx.stage.Screen;
-import javafx.geometry.Rectangle2D;
 
 import oshi.SystemInfo;
 import oshi.hardware.*;
@@ -28,9 +28,11 @@ import oshi.software.os.OperatingSystem;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.*;
 
 public final class DeviceInfoDialog {
+
+    private DeviceInfoDialog() {}
 
     // ===== iOS-glass / smooth =====
     private static final String DIALOG_ROOT_STYLE =
@@ -85,7 +87,7 @@ public final class DeviceInfoDialog {
                     "-fx-border-width: 1;" +
                     "-fx-padding: 12;";
 
-    // ✅ نفس سكرول القديم (يمين فقط) بدون أي “fast scroll” بالنص
+    // Scroll CSS (يمين فقط)
     private static final String SCROLL_CSS = """
         .scroll-pane { -fx-background-color: transparent; -fx-background: transparent; -fx-padding: 0; }
         .scroll-pane > .viewport { -fx-background-color: transparent; }
@@ -105,11 +107,25 @@ public final class DeviceInfoDialog {
         .scroll-bar .increment-arrow, .scroll-bar .decrement-arrow { -fx-shape: ""; -fx-padding: 0; }
     """;
 
-    private static final DecimalFormat GB_1D = new DecimalFormat("0.0");
-    private static final DecimalFormat GHZ_2D = new DecimalFormat("0.00");
+    private static final String SCROLL_CSS_DATA_URL = "data:text/css," + encodeCssStatic(SCROLL_CSS);
+
+    private static final DecimalFormat GB_1D   = new DecimalFormat("0.0");
+    private static final DecimalFormat GHZ_2D  = new DecimalFormat("0.00");
     private static final DecimalFormat MBPS_0D = new DecimalFormat("0");
-    private static final DecimalFormat PCT_1D = new DecimalFormat("0.0");
-    private static final DecimalFormat DPI_0D = new DecimalFormat("0");
+    private static final DecimalFormat PCT_1D  = new DecimalFormat("0.0");
+    private static final DecimalFormat DPI_0D  = new DecimalFormat("0");
+
+    // Background executor (daemon) بدل ForkJoinPool
+    private static final ExecutorService INFO_EXEC =
+            Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "fxShield-device-info");
+                t.setDaemon(true);
+                return t;
+            });
+
+    // Simple cache TTL
+    private static volatile Info cached;
+    private static volatile long cachedAtMs;
 
     public static void show(Stage owner) {
         Stage dialog = new Stage();
@@ -131,28 +147,34 @@ public final class DeviceInfoDialog {
 
         // Header
         Label title = new Label("Device Information");
-        title.setFont(Font.font("Segoe UI", 19));
+        title.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, 19)); // ✅ no CSS font-weight
         title.setTextFill(Color.web("#f3f4f6"));
-        title.setStyle("-fx-font-weight: 800;");
 
         Label sub = new Label("Full device specs and system details.");
-        sub.setFont(Font.font("Segoe UI", 12));
+        sub.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 12));
         sub.setTextFill(Color.web("#a7b0bf"));
         VBox titleBox = new VBox(4, title, sub);
 
         Button closeBtn = new Button("Close");
         closeBtn.setStyle(CLOSE_NORMAL);
+
+        ScaleTransition hoverIn = new ScaleTransition(Duration.millis(120), closeBtn);
+        hoverIn.setToX(1.03);
+        hoverIn.setToY(1.03);
+
+        ScaleTransition hoverOut = new ScaleTransition(Duration.millis(120), closeBtn);
+        hoverOut.setToX(1.00);
+        hoverOut.setToY(1.00);
+
         closeBtn.setOnMouseEntered(_ -> {
             closeBtn.setStyle(CLOSE_HOVER);
-            ScaleTransition st = new ScaleTransition(Duration.millis(120), closeBtn);
-            st.setToX(1.03); st.setToY(1.03);
-            st.play();
+            hoverOut.stop();
+            hoverIn.playFromStart();
         });
         closeBtn.setOnMouseExited(_ -> {
             closeBtn.setStyle(CLOSE_NORMAL);
-            ScaleTransition st = new ScaleTransition(Duration.millis(120), closeBtn);
-            st.setToX(1.00); st.setToY(1.00);
-            st.play();
+            hoverIn.stop();
+            hoverOut.playFromStart();
         });
         closeBtn.setOnAction(_ -> dialog.close());
 
@@ -177,7 +199,7 @@ public final class DeviceInfoDialog {
 
         Label loadingLbl = new Label("Collecting system information...");
         loadingLbl.setTextFill(Color.web("#a7b0bf"));
-        loadingLbl.setFont(Font.font("Segoe UI", 12));
+        loadingLbl.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 12));
         loading.getChildren().addAll(pi, loadingLbl);
         content.getChildren().add(loading);
 
@@ -190,7 +212,7 @@ public final class DeviceInfoDialog {
 
         Scene scene = new Scene(root, 720, 520);
         scene.setFill(Color.TRANSPARENT);
-        scene.getStylesheets().add("data:text/css," + encodeCss(SCROLL_CSS));
+        scene.getStylesheets().add(SCROLL_CSS_DATA_URL);
 
         scene.setOnKeyPressed(k -> {
             if (k.getCode() == javafx.scene.input.KeyCode.ESCAPE) dialog.close();
@@ -215,9 +237,10 @@ public final class DeviceInfoDialog {
         popIn.play();
 
         CompletableFuture
-                .supplyAsync(DeviceInfoDialog::collectInfo)
+                .supplyAsync(DeviceInfoDialog::getInfoCached, INFO_EXEC)
                 .whenComplete((info, err) -> Platform.runLater(() -> {
                     content.getChildren().clear();
+
                     if (err != null || info == null) {
                         content.getChildren().add(collapsibleSimple("Error",
                                 new VBox(10, row("Details", "Failed to read system info")),
@@ -227,9 +250,9 @@ public final class DeviceInfoDialog {
                         return;
                     }
 
-                    // ✅ نفس ترتيبك + أضفنا Display فقط
+                    // نفس ترتيبك + Display
                     content.getChildren().add(osCollapsible(info));
-                    content.getChildren().add(displayCollapsible(info.displays));   // ✅ NEW
+                    content.getChildren().add(displayCollapsible(info.displays));
                     content.getChildren().add(cpuCollapsible(info));
                     content.getChildren().add(ramCollapsible(info));
                     content.getChildren().add(gpuCollapsible(info.gpus));
@@ -238,6 +261,16 @@ public final class DeviceInfoDialog {
 
                     animateSections(content);
                 }));
+    }
+
+    private static Info getInfoCached() {
+        long now = System.currentTimeMillis();
+        Info c = cached;
+        if (c != null && (now - cachedAtMs) < 20_000) return c;
+        Info fresh = collectInfo();
+        cached = fresh;
+        cachedAtMs = now;
+        return fresh;
     }
 
     /* =================== Collapsible Builders =================== */
@@ -267,7 +300,6 @@ public final class DeviceInfoDialog {
         return collapsibleSimple("Operating System", summary, details);
     }
 
-    // ✅ NEW: Display (بالملخص: العدد + الأساسية + الدقة + Hz)
     private static VBox displayCollapsible(List<DisplaySpec> displays) {
         int count = (displays == null) ? 0 : displays.size();
         DisplaySpec primary = (count > 0) ? displays.get(0) : null;
@@ -430,16 +462,14 @@ public final class DeviceInfoDialog {
         return collapsibleSimple("Battery", summary, details);
     }
 
-    // Core collapsible
     private static VBox collapsibleSimple(String title, VBox summaryRows, VBox detailsBox) {
         Label t = new Label(title);
-        t.setFont(Font.font("Segoe UI", 14));
+        t.setFont(Font.font("Segoe UI", FontWeight.EXTRA_BOLD, 14)); // ✅ no CSS font-weight
         t.setTextFill(Color.web("#f3f4f6"));
-        t.setStyle("-fx-font-weight: 800;");
 
         Label chevron = new Label("⌄");
         chevron.setTextFill(Color.web("#a7b0bf"));
-        chevron.setFont(Font.font("Segoe UI", 14));
+        chevron.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 14));
         chevron.setRotate(0);
 
         Region spacer = new Region();
@@ -577,7 +607,7 @@ public final class DeviceInfoDialog {
             info.cpuModel = safe(id.getModel());
             info.cpuStepping = safe(id.getStepping());
 
-            // Get CPU cache sizes from OSHI's ProcessorCaches
+            // ✅ FIX: caches start at -1 so this works
             try {
                 List<CentralProcessor.ProcessorCache> caches = cpu.getProcessorCaches();
                 for (CentralProcessor.ProcessorCache cache : caches) {
@@ -587,9 +617,7 @@ public final class DeviceInfoDialog {
                     else if (level == 2 && info.l2Cache < 0) info.l2Cache = size;
                     else if (level == 3 && info.l3Cache < 0) info.l3Cache = size;
                 }
-            } catch (Throwable t) {
-            }
-            // CPU caches via OSHI only
+            } catch (Throwable ignored) {}
 
             info.cpuLoad = -1; // Snapshot load N/A (pure OSHI)
 
@@ -617,8 +645,6 @@ public final class DeviceInfoDialog {
                     info.gpus.add(g);
                 }
             }
-
-            // GPU clocks N/A (pure OSHI, no external tools)
             for (GpuSpec g : info.gpus) {
                 g.coreClock = "N/A";
                 g.memClock = "N/A";
@@ -673,32 +699,23 @@ public final class DeviceInfoDialog {
                 }
             } catch (Throwable ignored) {}
 
-            // Battery - using direct OSHI PowerSource API
+            // Battery
             try {
                 List<PowerSource> powerSources = hal.getPowerSources();
                 for (PowerSource ps : powerSources) {
                     BatterySpec bs = new BatterySpec();
                     bs.name = safe(ps.getName());
-                    
-                    // Get remaining capacity (returns 0.0-1.0)
+
                     double rem = ps.getRemainingCapacityPercent();
-                    if (rem >= 0 && rem <= 1.0) {
-                        bs.remaining = PCT_1D.format(rem * 100.0) + " %";
-                    } else {
-                        bs.remaining = "N/A";
-                    }
-                    
-                    // Check charging state
+                    if (rem >= 0 && rem <= 1.0) bs.remaining = PCT_1D.format(rem * 100.0) + " %";
+                    else bs.remaining = "N/A";
+
                     bs.state = ps.isCharging() ? "Charging" : "Discharging";
-                    
-                    // Get time remaining (returns seconds, -1 if unknown, -2 if unlimited/charging)
+
                     double timeRemaining = ps.getTimeRemainingEstimated();
-                    if (timeRemaining >= 0) {
-                        bs.timeRemaining = formatUptime((long) timeRemaining);
-                    } else {
-                        bs.timeRemaining = ps.isCharging() ? "Charging" : "N/A";
-                    }
-                    
+                    if (timeRemaining >= 0) bs.timeRemaining = formatUptime((long) timeRemaining);
+                    else bs.timeRemaining = ps.isCharging() ? "Charging" : "N/A";
+
                     info.batteries.add(bs);
                 }
             } catch (Throwable ignored) {}
@@ -712,7 +729,7 @@ public final class DeviceInfoDialog {
                 info.batteries.add(bs);
             }
 
-            // Displays - pure JavaFX Screen info
+            // Displays (JavaFX Screen)
             try {
                 List<Screen> screens = Screen.getScreens();
                 for (int i = 0; i < screens.size(); i++) {
@@ -734,81 +751,15 @@ public final class DeviceInfoDialog {
         }
     }
 
-    
-    private static String parseEdidManufacturer(byte[] edid) {
-        if (edid == null || edid.length < 128) return null;
-        try {
-            // EDID manufacturer ID is at bytes 8-9 (compressed 3-letter code)
-            int manufacturerId = ((edid[8] & 0xFF) << 8) | (edid[9] & 0xFF);
-            char c1 = (char) (((manufacturerId >> 10) & 0x1F) + 'A' - 1);
-            char c2 = (char) (((manufacturerId >> 5) & 0x1F) + 'A' - 1);
-            char c3 = (char) ((manufacturerId & 0x1F) + 'A' - 1);
-            String code = "" + c1 + c2 + c3;
-            
-            // Map common manufacturer codes to names
-            return switch (code) {
-                case "SAM" -> "Samsung";
-                case "LGD", "GSM" -> "LG";
-                case "DEL" -> "Dell";
-                case "ACI" -> "ASUS";
-                case "ACR" -> "Acer";
-                case "BNQ" -> "BenQ";
-                case "AOC" -> "AOC";
-                case "HWP" -> "HP";
-                case "LEN" -> "Lenovo";
-                case "VSC" -> "ViewSonic";
-                case "PHI", "PHL" -> "Philips";
-                case "AUO" -> "AU Optronics";
-                case "CMN" -> "Chimei Innolux";
-                case "BOE" -> "BOE";
-                case "IVO" -> "InfoVision";
-                case "SDC" -> "Samsung Display";
-                case "NEC" -> "NEC";
-                case "EIZ" -> "EIZO";
-                case "APP" -> "Apple";
-                case "MSI" -> "MSI";
-                default -> code; // Return the 3-letter code if unknown
-            };
-        } catch (Throwable t) {
-            return null;
-        }
-    }
-
-    private static String extractAfter(String text, String key) {
-        if (text == null) return "N/A";
-        int i = text.indexOf(key);
-        if (i < 0) return "N/A";
-        String s = text.substring(i + key.length()).trim();
-        int nl = s.indexOf('\n');
-        if (nl >= 0) s = s.substring(0, nl).trim();
-        return s.isBlank() ? "N/A" : s;
-    }
-
-    /**
-     * Parses the first numeric value from PS output.
-     * @param out raw command output
-     * @return first trimmed number or null
-     */
-    private static String parseFirstNumber(String out) {
-        if (out == null) return null;
-        for (String line : out.split("\\R+")) {
-            String trimmed = line.trim();
-            if (trimmed.matches("\\d+")) {
-                return trimmed;
-            }
-        }
-        return null;
-    }
-
     /* =================== UI Helpers =================== */
 
     private static HBox row(String k, String v) {
         Label left = new Label(k);
-        left.setFont(Font.font("Segoe UI", 12));
+        left.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 12));
         left.setTextFill(Color.web("#a7b0bf"));
 
         Label right = new Label(v);
-        right.setFont(Font.font("Segoe UI", 12));
+        right.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 12));
         right.setTextFill(Color.web("#e5e7eb"));
         right.setWrapText(true);
 
@@ -822,9 +773,8 @@ public final class DeviceInfoDialog {
 
     private static VBox miniCard(String title, HBox... rows) {
         Label t = new Label(title);
-        t.setFont(Font.font("Segoe UI", 12.5));
+        t.setFont(Font.font("Segoe UI", FontWeight.SEMI_BOLD, 12.5)); // ✅ no CSS font-weight
         t.setTextFill(Color.web("#e5e7eb"));
-        t.setStyle("-fx-font-weight: 700;");
 
         VBox box = new VBox(8);
         box.setStyle(MINI_CARD_STYLE);
@@ -835,7 +785,7 @@ public final class DeviceInfoDialog {
 
     private static VBox miniCardText(String text) {
         Label t = new Label(text);
-        t.setFont(Font.font("Segoe UI", 12));
+        t.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 12));
         t.setTextFill(Color.web("#a7b0bf"));
         VBox box = new VBox(t);
         box.setStyle(MINI_CARD_STYLE);
@@ -861,7 +811,6 @@ public final class DeviceInfoDialog {
             idx++;
         }
     }
-
 
     /* =================== Formatting =================== */
 
@@ -927,7 +876,7 @@ public final class DeviceInfoDialog {
         return tt;
     }
 
-    private static String encodeCss(String css) {
+    private static String encodeCssStatic(String css) {
         return css.replace("\n", "%0A")
                 .replace(" ", "%20")
                 .replace("#", "%23")
@@ -954,49 +903,18 @@ public final class DeviceInfoDialog {
         return s == null || s.isBlank() || "N/A".equalsIgnoreCase(s.trim());
     }
 
-    // Reflection helpers
-    private static String reflectString(Object obj, String method, String def) {
-        try {
-            Object v = obj.getClass().getMethod(method).invoke(obj);
-            return v == null ? def : String.valueOf(v);
-        } catch (Throwable t) { return def; }
-    }
-
-    private static Double reflectDouble(Object obj, String method, Double def) {
-        try {
-            Object v = obj.getClass().getMethod(method).invoke(obj);
-            if (v == null) return def;
-            if (v instanceof Number n) return n.doubleValue();
-            return Double.parseDouble(v.toString());
-        } catch (Throwable t) { return def; }
-    }
-
-    private static Boolean reflectBoolean(Object obj, String method, Boolean def) {
-        try {
-            Object v = obj.getClass().getMethod(method).invoke(obj);
-            if (v == null) return def;
-            if (v instanceof Boolean b) return b;
-            return Boolean.parseBoolean(v.toString());
-        } catch (Throwable t) { return def; }
-    }
-
-    private static long reflectLong(Object obj, String method, long def) {
-        try {
-            Object v = obj.getClass().getMethod(method).invoke(obj);
-            if (v == null) return def;
-            if (v instanceof Number n) return n.longValue();
-            return Long.parseLong(v.toString());
-        } catch (Throwable t) { return def; }
-    }
-
     /* =================== DTOs =================== */
 
     private static final class Info {
         String osString, arch, cpuName, osVersion, kernel, hostname, username, bootTime, uptime, timezone, locale;
         String cpuVendor, cpuFamily, cpuModel, cpuStepping, ramType, ramSpeed;
-        double cpuLoad;
+        double cpuLoad = -1;
         int physCores, logCores;
-        long maxHz, memTotal, memAvail, l1Cache, l2Cache, l3Cache, swapTotal, swapUsed, swapFree;
+        long maxHz, memTotal, memAvail;
+
+        // ✅ FIX: start -1 so cache filling works
+        long l1Cache = -1, l2Cache = -1, l3Cache = -1;
+        long swapTotal = -1, swapUsed = -1, swapFree = -1;
 
         List<GpuSpec> gpus = new ArrayList<>();
         List<NicSpec> nics = new ArrayList<>();
