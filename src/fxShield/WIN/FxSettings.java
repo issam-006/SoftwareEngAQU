@@ -1,7 +1,8 @@
 package fxShield.WIN;
 
-import java.io.Serial;
-import java.io.Serializable;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
 import java.util.Objects;
 import java.util.Properties;
 
@@ -170,6 +171,85 @@ public final class FxSettings implements Serializable {
             case "false", "0", "no", "n", "off" -> false;
             default -> def;
         };
+    }
+
+    // =========================================================================
+    // Persistence
+    // =========================================================================
+
+    private static final String DIR_NAME = "FxShield";
+    private static final String FILE_NAME = "settings.properties";
+
+    private static Path configDir() {
+        String appData = System.getenv("APPDATA");
+        if (appData == null || appData.isBlank()) {
+            appData = System.getProperty("user.home", ".");
+        }
+        return Paths.get(appData, DIR_NAME);
+    }
+
+    private static Path configFile() {
+        return configDir().resolve(FILE_NAME);
+    }
+
+    /**
+     * Loads settings from disk.
+     * Returns defaults if file is missing or corrupted.
+     */
+    public static synchronized FxSettings load() {
+        Properties p = new Properties();
+        Path file = configFile();
+        if (Files.exists(file)) {
+            try (InputStream in = Files.newInputStream(file);
+                 Reader r = new InputStreamReader(in, StandardCharsets.UTF_8)) {
+                p.load(r);
+            } catch (Exception ignored) {
+            }
+        }
+        return fromProperties(p, defaults());
+    }
+
+    /**
+     * Saves settings to disk atomically.
+     */
+    public static synchronized void save(FxSettings s) {
+        if (s == null) return;
+        Properties p = s.toProperties();
+
+        Path dir = configDir();
+        Path file = configFile();
+        Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
+
+        try {
+            Files.createDirectories(dir);
+
+            try (OutputStream out = Files.newOutputStream(tmp, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+                 Writer w = new OutputStreamWriter(out, StandardCharsets.UTF_8)) {
+                p.store(w, "FxShield Settings");
+            }
+
+            try {
+                Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
+            }
+
+        } catch (IOException ignored) {
+            try {
+                Files.deleteIfExists(tmp);
+            } catch (IOException ignore) {
+            }
+        }
+    }
+
+    /**
+     * Deletes the settings file.
+     */
+    public static synchronized void reset() {
+        try {
+            Files.deleteIfExists(configFile());
+        } catch (IOException ignored) {
+        }
     }
 
     // =========================================================================

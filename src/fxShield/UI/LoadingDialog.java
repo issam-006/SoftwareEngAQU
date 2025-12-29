@@ -1,14 +1,21 @@
 package fxShield.UI;
 
 import javafx.animation.Animation;
+import javafx.animation.FadeTransition;
+import javafx.animation.Interpolator;
 import javafx.animation.KeyFrame;
 import javafx.animation.PauseTransition;
 import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
+import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.effect.Effect;
+import javafx.scene.effect.GaussianBlur;
+import javafx.scene.input.KeyCode;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Pane;
@@ -16,27 +23,48 @@ import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 import javafx.scene.text.Font;
+import javafx.stage.Modality;
 import javafx.stage.Stage;
+import javafx.stage.StageStyle;
 import javafx.stage.WindowEvent;
 import javafx.util.Duration;
 
 /**
- * Unified loading dialog with animated dots and completion states.
+ * Unified loading dialog with animated dots, completion states, and base dialog logic.
+ * Merged from BaseDialog and LoadingDialog.
  */
-public final class LoadingDialog extends BaseDialog {
+public final class LoadingDialog {
 
     private static final double DEFAULT_WIDTH = 380;
     private static final double DEFAULT_HEIGHT = 180;
+    private static final double DEFAULT_BLUR_RADIUS = 18.0;
 
     private static final Duration DOTS_INTERVAL = Duration.millis(260);
     private static final Duration DONE_DELAY = Duration.millis(900);
     private static final Duration FAIL_DELAY = Duration.millis(1200);
 
-    // Cache fonts (avoid Font.font allocations per instance)
+    // Cache fonts
     private static final Font FONT_TITLE = StyleConstants.FONT_DIALOG_TITLE;
     private static final Font FONT_MESSAGE = StyleConstants.FONT_DIALOG_SUBTITLE;
     private static final Font FONT_BUTTON = StyleConstants.FONT_DIALOG_BUTTON;
     private static final Font FONT_DOTS = Font.font(StyleConstants.FONT_FAMILY, 20);
+
+    // Reference counter for stacked dialogs blur.
+    private static int blurReferenceCount = 0;
+
+    private final Stage stage;
+    private final Stage owner;
+    private final Node ownerRoot;
+    private final Effect previousOwnerEffect;
+
+    private Pane root;
+    private boolean closing;
+
+    private final double width;
+    private final double height;
+
+    private final Duration fadeInDuration = Duration.millis(180);
+    private final Duration fadeOutDuration = Duration.millis(150);
 
     private final Label titleLabel;
     private final Label messageLabel;
@@ -64,11 +92,36 @@ public final class LoadingDialog extends BaseDialog {
     }
 
     private LoadingDialog(Stage owner, String title, String message, boolean supportsReboot) {
-        super(owner, DEFAULT_WIDTH, supportsReboot ? 240 : DEFAULT_HEIGHT);
-
+        this.owner = owner;
+        this.width = DEFAULT_WIDTH;
+        this.height = supportsReboot ? 240 : DEFAULT_HEIGHT;
         this.supportsReboot = supportsReboot;
-        setTitle(title);
 
+        this.stage = new Stage();
+        if (owner != null) {
+            stage.initOwner(owner);
+        }
+        stage.initModality(Modality.APPLICATION_MODAL);
+        stage.initStyle(StageStyle.TRANSPARENT);
+        stage.setResizable(false);
+        stage.setTitle(title);
+
+        ownerRoot = (owner != null && owner.getScene() != null) ? owner.getScene().getRoot() : null;
+        previousOwnerEffect = (ownerRoot != null) ? ownerRoot.getEffect() : null;
+
+        applyOwnerBlurIfNeeded();
+
+        stage.setOnCloseRequest(e -> {
+            e.consume();
+            close();
+        });
+
+        stage.setOnHidden(e -> {
+            stopDotsAnimation();
+            restoreOwnerBlur();
+        });
+
+        // UI Components
         titleLabel = new Label(safe(title));
         titleLabel.setFont(FONT_TITLE);
         titleLabel.setTextFill(Color.web(StyleConstants.COLOR_TEXT_WHITE));
@@ -103,17 +156,14 @@ public final class LoadingDialog extends BaseDialog {
         dotsTimeline = new Timeline(new KeyFrame(DOTS_INTERVAL, e -> advanceDots()));
         dotsTimeline.setCycleCount(Animation.INDEFINITE);
 
-        // Stop animation even if someone hides the window without calling close()
         stage.addEventHandler(WindowEvent.WINDOW_HIDDEN, e -> stopDotsAnimation());
     }
 
-    @Override
-    protected Pane buildContent() {
+    private Pane buildContent() {
         BorderPane pane = new BorderPane();
         pane.setPadding(new Insets(supportsReboot ? 32 : 16, 22, supportsReboot ? 32 : 16, 22));
         pane.setStyle(supportsReboot ? StyleConstants.DIALOG_REBOOT : StyleConstants.DIALOG_LOADING);
 
-        // Rounded corners clipping (bind to actual size)
         Rectangle clip = new Rectangle();
         clip.setArcWidth(supportsReboot ? 28 : 24);
         clip.setArcHeight(supportsReboot ? 28 : 24);
@@ -122,14 +172,12 @@ public final class LoadingDialog extends BaseDialog {
         pane.setClip(clip);
 
         VBox contentBox;
-
         if (supportsReboot) {
             contentBox = new VBox(14, titleLabel, messageLabel, dotsLabel, rebootNoteLabel, buttonsRow);
             contentBox.setAlignment(Pos.CENTER);
         } else {
             VBox textBox = new VBox(6, titleLabel, messageLabel);
             textBox.setAlignment(Pos.CENTER_LEFT);
-
             contentBox = new VBox(12, textBox, dotsLabel);
             contentBox.setAlignment(Pos.CENTER_LEFT);
         }
@@ -138,12 +186,72 @@ public final class LoadingDialog extends BaseDialog {
         return pane;
     }
 
+    private void initialize() {
+        root = buildContent();
+
+        Scene scene = new Scene(root, width, height);
+        scene.setFill(Color.TRANSPARENT);
+
+        scene.setOnKeyPressed(e -> {
+            if (e.getCode() == KeyCode.ESCAPE) close();
+        });
+
+        stage.setScene(scene);
+
+        if (owner != null) {
+            stage.setX(owner.getX() + (owner.getWidth() - width) / 2.0);
+            stage.setY(owner.getY() + (owner.getHeight() - height) / 2.0);
+        } else {
+            stage.centerOnScreen();
+        }
+
+        root.setOpacity(0.0);
+        FadeTransition fadeInTransition = fadeIn(root, fadeInDuration);
+        stage.setOnShown(e -> fadeInTransition.playFromStart());
+    }
+
+    public void show() {
+        if (root == null) initialize();
+        stage.show();
+    }
+
+    public void close() {
+        if (closing) return;
+        closing = true;
+
+        if (root == null || !stage.isShowing()) {
+            stage.hide();
+            return;
+        }
+
+        stopDotsAnimation();
+        FadeTransition fadeOutTransition = fadeOut(root, fadeOutDuration);
+        fadeOutTransition.setOnFinished(e -> stage.hide());
+        fadeOutTransition.playFromStart();
+    }
+
+    private void applyOwnerBlurIfNeeded() {
+        if (ownerRoot == null) return;
+        if (blurReferenceCount == 0) {
+            ownerRoot.setEffect(new GaussianBlur(DEFAULT_BLUR_RADIUS));
+        }
+        blurReferenceCount++;
+    }
+
+    private void restoreOwnerBlur() {
+        if (ownerRoot == null) return;
+        blurReferenceCount = Math.max(0, blurReferenceCount - 1);
+        if (blurReferenceCount == 0) {
+            ownerRoot.setEffect(previousOwnerEffect);
+        }
+    }
+
     private void startDotsAnimation() {
         dotsTimeline.play();
     }
 
     private void stopDotsAnimation() {
-        BaseDialog.stopSafely(dotsTimeline);
+        stopSafely(dotsTimeline);
     }
 
     private void advanceDots() {
@@ -168,7 +276,7 @@ public final class LoadingDialog extends BaseDialog {
             dotsLabel.setText("✓");
             dotsLabel.setTextFill(Color.web(StyleConstants.COLOR_SUCCESS));
 
-            PauseTransition wait = BaseDialog.pauseThen(DONE_DELAY, this::close);
+            PauseTransition wait = pauseThen(DONE_DELAY, this::close);
             wait.playFromStart();
         });
     }
@@ -180,7 +288,7 @@ public final class LoadingDialog extends BaseDialog {
             dotsLabel.setText("✕");
             dotsLabel.setTextFill(Color.web(StyleConstants.COLOR_DANGER));
 
-            PauseTransition wait = BaseDialog.pauseThen(FAIL_DELAY, this::close);
+            PauseTransition wait = pauseThen(FAIL_DELAY, this::close);
             wait.playFromStart();
         });
     }
@@ -209,8 +317,6 @@ public final class LoadingDialog extends BaseDialog {
         btn.setFont(FONT_BUTTON);
         btn.setFocusTraversable(false);
         btn.setMnemonicParsing(false);
-
-        // IMPORTANT: keep font via setFont(), style only for colors/padding
         btn.setStyle(normalStyle);
         btn.hoverProperty().addListener((obs, wasHover, isHover) -> btn.setStyle(isHover ? hoverStyle : normalStyle));
         return btn;
@@ -219,7 +325,7 @@ public final class LoadingDialog extends BaseDialog {
     private void showButtons() {
         buttonsRow.setVisible(true);
         buttonsRow.setManaged(true);
-        BaseDialog.fadeIn(buttonsRow, Duration.millis(160)).playFromStart();
+        fadeIn(buttonsRow, Duration.millis(160)).playFromStart();
     }
 
     private void performReboot() {
@@ -238,10 +344,37 @@ public final class LoadingDialog extends BaseDialog {
         rebootThread.start();
     }
 
-    @Override
-    public void close() {
-        stopDotsAnimation();
-        super.close();
+    private void runOnFxThread(Runnable action) {
+        if (action == null) return;
+        if (Platform.isFxApplicationThread()) action.run();
+        else Platform.runLater(action);
+    }
+
+    private static FadeTransition fadeIn(Node node, Duration duration) {
+        FadeTransition fade = new FadeTransition(duration, node);
+        fade.setFromValue(0.0);
+        fade.setToValue(1.0);
+        fade.setInterpolator(Interpolator.EASE_OUT);
+        return fade;
+    }
+
+    private static FadeTransition fadeOut(Node node, Duration duration) {
+        FadeTransition fade = new FadeTransition(duration, node);
+        fade.setFromValue(1.0);
+        fade.setToValue(0.0);
+        fade.setInterpolator(Interpolator.EASE_IN);
+        return fade;
+    }
+
+    private static void stopSafely(Animation animation) {
+        if (animation == null) return;
+        try { animation.stop(); } catch (Exception ignored) {}
+    }
+
+    private static PauseTransition pauseThen(Duration duration, Runnable onFinished) {
+        PauseTransition pause = new PauseTransition(duration);
+        if (onFinished != null) pause.setOnFinished(e -> onFinished.run());
+        return pause;
     }
 
     private static String safe(String s) {

@@ -5,11 +5,7 @@ import fxShield.GPU.GPUStabilizer;
 import fxShield.GPU.GpuUsageProvider;
 import fxShield.GPU.HybridGpuUsageProvider;
 import oshi.SystemInfo;
-import oshi.hardware.CentralProcessor;
-import oshi.hardware.GlobalMemory;
-import oshi.hardware.GraphicsCard;
-import oshi.hardware.HWDiskStore;
-import oshi.hardware.HardwareAbstractionLayer;
+import oshi.hardware.*;
 import oshi.software.os.FileSystem;
 import oshi.software.os.OSFileStore;
 import oshi.software.os.OperatingSystem;
@@ -18,11 +14,7 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -51,102 +43,60 @@ public final class SystemMonitorService {
     // =========================================================================
     // Data Structures
     // =========================================================================
-
-    public interface Listener {
-        void onUpdate(double cpuPercent, RamSnapshot ram, PhysicalDiskSnapshot[] disks, int gpuUsage);
-    }
-
-    public static class RamSnapshot {
-        public double totalGb;
-        public double usedGb;
-        public double percent;
-    }
-
-    public static class PhysicalDiskSnapshot {
-        public int index;
-        public String model;
-        public String typeLabel;
-        public double sizeGb;
-        public double usedGb;
-        public double totalGb;
-        public double usedPercent;
-        public boolean hasUsage;
-        public double activePercent;
-    }
-
-    private static final class LogicalUsage {
-        double totalGb;
-        double usedGb;
-    }
-
-    // =========================================================================
-    // System Components
-    // =========================================================================
-
     private final SystemInfo si;
     private final HardwareAbstractionLayer hal;
     private final CentralProcessor cpu;
     private final GlobalMemory mem;
+
+    // =========================================================================
+    // System Components
+    // =========================================================================
     private final OperatingSystem os;
     private final FileSystem fs;
     private final HWDiskStore[] diskStores;
     private final GraphicsCard[] gpus;
+    // CPU smoothing (dual EMA + median + deadband)
+    private final double cpuAlphaFast = 0.45;
+    private final double cpuAlphaSlow = 0.12;
+    private final double cpuNoiseFloor = 0.3;
+    // CPU median window (no streams / no per-tick allocations)
+    private final double[] cpuWindow = new double[5];
 
     // =========================================================================
     // Monitoring State
     // =========================================================================
-
-    private volatile Listener listener;
-    private ScheduledExecutorService exec;
-
-    // CPU sampling state
-    private long[] prevCpuTicks;
-    private long lastCpuSampleMs = 0L;
-    private double lastCpuPercent = 0.0;
-
-    // CPU smoothing (dual EMA + median + deadband)
-    private final double cpuAlphaFast = 0.45;
-    private final double cpuAlphaSlow = 0.12;
-    private double cpuEmaFast = 0;
-    private double cpuEmaSlow = 0;
-    private boolean cpuEmaInit = false;
-    private final double cpuNoiseFloor = 0.3;
-
-    // CPU median window (no streams / no per-tick allocations)
-    private final double[] cpuWindow = new double[5];
-    private int cpuWinCount = 0;
-    private int cpuWinPos = 0;
     private final double[] cpuSortBuf = new double[5];
-
     // Disk busy sampling
     private final long[] prevTransferTime;
     private final long[] prevDiskTs;
     private final double[] diskBusyEma;
-    private volatile boolean disksWarmedUp = false;
-
     // Disk type cache (must be thread-safe; filled in background thread)
     private final Map<Integer, String> diskTypeByIndex = new ConcurrentHashMap<>();
-
     // GPU monitoring
     private final boolean isWindows;
     private final GpuUsageProvider gpuProvider;
     private final GPUStabilizer gpuStabilizer = new GPUStabilizer(2000, 0.30, 4, -1);
-
+    // GPU smoothing (median-of-3 + EMA) with fixed buffers
+    private final int[] gpuWindow = new int[3];
+    private final double gpuAlpha = 0.30;
+    private volatile Listener listener;
+    private ScheduledExecutorService exec;
+    // CPU sampling state
+    private long[] prevCpuTicks;
+    private long lastCpuSampleMs = 0L;
+    private double lastCpuPercent = 0.0;
+    private double cpuEmaFast = 0;
+    private double cpuEmaSlow = 0;
+    private boolean cpuEmaInit = false;
+    private int cpuWinCount = 0;
+    private int cpuWinPos = 0;
+    private volatile boolean disksWarmedUp = false;
     private volatile boolean gpuThreadRunning = false;
     private Thread gpuThread;
     private volatile int lastGpuStableForUi = -1;
-
-    // GPU smoothing (median-of-3 + EMA) with fixed buffers
-    private final int[] gpuWindow = new int[3];
     private int gpuWinCount = 0;
     private int gpuWinPos = 0;
-    private final double gpuAlpha = 0.30;
     private int gpuEma = -1;
-
-    // =========================================================================
-    // Constructor and Initialization
-    // =========================================================================
-
     public SystemMonitorService() {
         si = new SystemInfo();
         hal = si.getHardware();
@@ -174,7 +124,8 @@ public final class SystemMonitorService {
         for (int i = 0; i < diskStores.length; i++) {
             try {
                 diskStores[i].updateAttributes();
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
             prevTransferTime[i] = safeLong(diskStores[i].getTransferTime());
             prevDiskTs[i] = now;
             diskBusyEma[i] = 0.0;
@@ -183,9 +134,86 @@ public final class SystemMonitorService {
         gpuProvider = new HybridGpuUsageProvider(isWindows);
     }
 
+    private static DiskWinInfo findBestByModel(Map<String, DiskWinInfo> map, String oshiModel) {
+        String key = oshiModel.toLowerCase();
+        DiskWinInfo exact = map.get(key);
+        if (exact != null) return exact;
+
+        for (Map.Entry<String, DiskWinInfo> e : map.entrySet()) {
+            String m = e.getKey();
+            if (m.isEmpty()) continue;
+            if (key.contains(m) || m.contains(key)) return e.getValue();
+        }
+        return null;
+    }
+
+    private static DiskWinInfo matchByClosestSize(long size, Map<Long, DiskWinInfo> map) {
+        if (map.isEmpty() || size <= 0) return null;
+
+        long bestDiff = Long.MAX_VALUE;
+        DiskWinInfo best = null;
+
+        for (Map.Entry<Long, DiskWinInfo> e : map.entrySet()) {
+            long s = e.getKey();
+            long diff = Math.abs(s - size);
+            if (diff < bestDiff) {
+                bestDiff = diff;
+                best = e.getValue();
+            }
+        }
+
+        double ratio = (bestDiff * 1.0) / size;
+        return (ratio <= 0.10) ? best : null;
+    }
+
+    private static String decideDiskLabel(DiskWinInfo info) {
+        String media = Optional.ofNullable(info.mediaType).orElse("").toLowerCase();
+        if (media.contains("ssd")) return "SSD";
+        if (media.contains("hdd")) return "HDD";
+        if (info.rotationRate != null) {
+            if (info.rotationRate == 0) return "SSD";
+            if (info.rotationRate > 0) return "HDD";
+        }
+        return "Disk";
+    }
+
+    // =========================================================================
+    // Constructor and Initialization
+    // =========================================================================
+
+    private static String safe(String s, String fallback) {
+        if (s == null) return fallback;
+        String t = s.trim();
+        return t.isEmpty() ? fallback : t;
+    }
+
     // =========================================================================
     // Public API Methods
     // =========================================================================
+
+    private static long safeLong(long v) {
+        return Math.max(0L, v);
+    }
+
+    private static double toGb(long bytes) {
+        return bytes / (1024.0 * 1024 * 1024);
+    }
+
+    private static double clamp01_100(double v) {
+        if (v < 0) return 0;
+        if (v > 100) return 100;
+        return v;
+    }
+
+    private static int clampInt(int v, int min, int max) {
+        if (v < min) return min;
+        if (v > max) return max;
+        return v;
+    }
+
+    private static <T> List<T> safeList(List<T> x) {
+        return (x == null) ? Collections.emptyList() : x;
+    }
 
     public void setListener(Listener l) {
         this.listener = l;
@@ -210,9 +238,14 @@ public final class SystemMonitorService {
         exec.scheduleAtFixedRate(() -> {
             try {
                 sampleAndNotify();
-            } catch (Throwable ignored) {}
+            } catch (Throwable ignored) {
+            }
         }, 0, LOOP_MS, TimeUnit.MILLISECONDS);
     }
+
+    // =========================================================================
+    // GPU Monitoring Thread
+    // =========================================================================
 
     public void stop() {
         // stop GPU thread first
@@ -221,7 +254,8 @@ public final class SystemMonitorService {
 
         try {
             gpuProvider.close();
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
 
         if (exec != null) {
             exec.shutdownNow();
@@ -242,18 +276,22 @@ public final class SystemMonitorService {
         return combined.isBlank() ? "Unknown" : combined;
     }
 
+    // =========================================================================
+    // Main Monitoring Loop
+    // =========================================================================
+
     public RamSnapshot readRamOnce() {
         return readRamSnapshot();
     }
+
+    // =========================================================================
+    // CPU Monitoring
+    // =========================================================================
 
     public PhysicalDiskSnapshot[] sampleDisksOnce() {
         LogicalUsage lu = readLogicalUsage();
         return readPhysicalSnapshots(lu, System.currentTimeMillis());
     }
-
-    // =========================================================================
-    // GPU Monitoring Thread
-    // =========================================================================
 
     private void startGpuThread() {
         if (gpuThreadRunning) return;
@@ -266,7 +304,8 @@ public final class SystemMonitorService {
                 int raw = -1;
                 try {
                     raw = gpuProvider.readGpuUsagePercent();
-                } catch (Throwable ignored) {}
+                } catch (Throwable ignored) {
+                }
 
                 int stable = gpuStabilizer.update(raw, now);
 
@@ -290,12 +329,20 @@ public final class SystemMonitorService {
         gpuThread.start();
     }
 
+    // =========================================================================
+    // RAM Monitoring
+    // =========================================================================
+
     private void pushGpuSample(int v) {
         gpuWindow[gpuWinPos] = clampInt(v, 0, 100);
         gpuWinPos++;
         if (gpuWinPos == gpuWindow.length) gpuWinPos = 0;
         if (gpuWinCount < gpuWindow.length) gpuWinCount++;
     }
+
+    // =========================================================================
+    // Disk Monitoring
+    // =========================================================================
 
     private int computeGpuMedian() {
         if (gpuWinCount <= 0) return -1;
@@ -311,15 +358,23 @@ public final class SystemMonitorService {
         int a = gpuWindow[0];
         int b = gpuWindow[1];
         int c = gpuWindow[2];
-        if (a > b) { int t = a; a = b; b = t; }
-        if (b > c) { int t = b; b = c; c = t; }
-        if (a > b) { int t = a; a = b; b = t; }
+        if (a > b) {
+            int t = a;
+            a = b;
+            b = t;
+        }
+        if (b > c) {
+            int t = b;
+            b = c;
+            c = t;
+        }
+        if (a > b) {
+            int t = a;
+            a = b;
+            b = t;
+        }
         return b;
     }
-
-    // =========================================================================
-    // Main Monitoring Loop
-    // =========================================================================
 
     private void sampleAndNotify() {
         Listener l = this.listener;
@@ -353,7 +408,7 @@ public final class SystemMonitorService {
     }
 
     // =========================================================================
-    // CPU Monitoring
+    // Disk Type Detection (Windows)
     // =========================================================================
 
     private double readCpuPercent() {
@@ -413,10 +468,6 @@ public final class SystemMonitorService {
         return cpuSortBuf[n / 2];
     }
 
-    // =========================================================================
-    // RAM Monitoring
-    // =========================================================================
-
     private RamSnapshot readRamSnapshot() {
         RamSnapshot s = new RamSnapshot();
 
@@ -430,10 +481,6 @@ public final class SystemMonitorService {
 
         return s;
     }
-
-    // =========================================================================
-    // Disk Monitoring
-    // =========================================================================
 
     private LogicalUsage readLogicalUsage() {
         LogicalUsage u = new LogicalUsage();
@@ -464,7 +511,8 @@ public final class SystemMonitorService {
             HWDiskStore d = diskStores[i];
             try {
                 d.updateAttributes();
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
 
             PhysicalDiskSnapshot s = new PhysicalDiskSnapshot();
             s.index = i;
@@ -512,10 +560,6 @@ public final class SystemMonitorService {
         return snaps;
     }
 
-    // =========================================================================
-    // Disk Type Detection (Windows)
-    // =========================================================================
-
     private void loadDiskMediaTypesWindows() {
         try {
             Map<String, DiskWinInfo> winByModel = new HashMap<>();
@@ -543,15 +587,13 @@ public final class SystemMonitorService {
                 String label = (best != null) ? decideDiskLabel(best) : "Disk";
                 diskTypeByIndex.put(i, label);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception ignored) {
+        }
     }
 
-    private static final class DiskWinInfo {
-        String model;
-        String mediaType;
-        Long sizeBytes;
-        Integer rotationRate;
-    }
+    // =========================================================================
+    // Utility Methods
+    // =========================================================================
 
     private void parsePsDiskLines(String out,
                                   Map<String, DiskWinInfo> winByModel,
@@ -602,85 +644,9 @@ public final class SystemMonitorService {
                     winByModel.put(model.toLowerCase(), info);
                     winBySize.put(size, info);
                 }
-            } catch (Exception ignored) {}
-        }
-    }
-
-    private static DiskWinInfo findBestByModel(Map<String, DiskWinInfo> map, String oshiModel) {
-        String key = oshiModel.toLowerCase();
-        DiskWinInfo exact = map.get(key);
-        if (exact != null) return exact;
-
-        for (Map.Entry<String, DiskWinInfo> e : map.entrySet()) {
-            String m = e.getKey();
-            if (m.isEmpty()) continue;
-            if (key.contains(m) || m.contains(key)) return e.getValue();
-        }
-        return null;
-    }
-
-    private static DiskWinInfo matchByClosestSize(long size, Map<Long, DiskWinInfo> map) {
-        if (map.isEmpty() || size <= 0) return null;
-
-        long bestDiff = Long.MAX_VALUE;
-        DiskWinInfo best = null;
-
-        for (Map.Entry<Long, DiskWinInfo> e : map.entrySet()) {
-            long s = e.getKey();
-            long diff = Math.abs(s - size);
-            if (diff < bestDiff) {
-                bestDiff = diff;
-                best = e.getValue();
+            } catch (Exception ignored) {
             }
         }
-
-        double ratio = (bestDiff * 1.0) / size;
-        return (ratio <= 0.10) ? best : null;
-    }
-
-    private static String decideDiskLabel(DiskWinInfo info) {
-        String media = Optional.ofNullable(info.mediaType).orElse("").toLowerCase();
-        if (media.contains("ssd")) return "SSD";
-        if (media.contains("hdd")) return "HDD";
-        if (info.rotationRate != null) {
-            if (info.rotationRate == 0) return "SSD";
-            if (info.rotationRate > 0) return "HDD";
-        }
-        return "Disk";
-    }
-
-    // =========================================================================
-    // Utility Methods
-    // =========================================================================
-
-    private static String safe(String s, String fallback) {
-        if (s == null) return fallback;
-        String t = s.trim();
-        return t.isEmpty() ? fallback : t;
-    }
-
-    private static long safeLong(long v) {
-        return Math.max(0L, v);
-    }
-
-    private static double toGb(long bytes) {
-        return bytes / (1024.0 * 1024 * 1024);
-    }
-
-    private static double clamp01_100(double v) {
-        if (v < 0) return 0;
-        if (v > 100) return 100;
-        return v;
-    }
-
-    private static int clampInt(int v, int min, int max) {
-        if (v < min) return min;
-        if (v > max) return max;
-        return v;
-    }
-
-    private static <T> List<T> safeList(List<T> x) {
-        return (x == null) ? Collections.emptyList() : x;
     }
 
     private String runPowerShellAll(String psCommand) {
@@ -714,9 +680,46 @@ public final class SystemMonitorService {
 
         } catch (Exception e) {
             if (p != null) {
-                try { p.destroyForcibly(); } catch (Exception ignored) {}
+                try {
+                    p.destroyForcibly();
+                } catch (Exception ignored) {
+                }
             }
             return null;
         }
+    }
+
+    public interface Listener {
+        void onUpdate(double cpuPercent, RamSnapshot ram, PhysicalDiskSnapshot[] disks, int gpuUsage);
+    }
+
+    public static class RamSnapshot {
+        public double totalGb;
+        public double usedGb;
+        public double percent;
+    }
+
+    public static class PhysicalDiskSnapshot {
+        public int index;
+        public String model;
+        public String typeLabel;
+        public double sizeGb;
+        public double usedGb;
+        public double totalGb;
+        public double usedPercent;
+        public boolean hasUsage;
+        public double activePercent;
+    }
+
+    private static final class LogicalUsage {
+        double totalGb;
+        double usedGb;
+    }
+
+    private static final class DiskWinInfo {
+        String model;
+        String mediaType;
+        Long sizeBytes;
+        Integer rotationRate;
     }
 }

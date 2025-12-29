@@ -1,7 +1,9 @@
 package fxShield.WIN;
 
 import java.time.Duration;
-import java.util.concurrent.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Schedules background automations (free RAM / optimize disk).
@@ -14,23 +16,21 @@ public final class AutomationService implements AutoCloseable {
 
     // Singleton
     private static final AutomationService INSTANCE = new AutomationService();
-    public static AutomationService get() { return INSTANCE; }
-
     // Scheduling
     private static final long FREE_RAM_INITIAL_DELAY_SEC = 30;
     private static final long FREE_RAM_PERIOD_SEC = 10 * 60;
-
     private static final long DISK_INITIAL_DELAY_SEC = 60;
     private static final long DISK_PERIOD_SEC = 30 * 60;
-
     // PowerShell
     private static final Duration POWERSHELL_TIMEOUT = Duration.ofSeconds(30);
-
     private volatile ScheduledExecutorService exec;
     private volatile FxSettings lastApplied;
-
     private AutomationService() {
         Runtime.getRuntime().addShutdownHook(new Thread(this::stop, "fxShield-automation-shutdown"));
+    }
+
+    public static AutomationService get() {
+        return INSTANCE;
     }
 
     public synchronized void apply(FxSettings settings) {
@@ -73,8 +73,10 @@ public final class AutomationService implements AutoCloseable {
         }
 
         // Optional OS integration
-        try { WindowsUtils.applyStartup(s.autoStartWithWindows); }
-        catch (Throwable ignored) {}
+        try {
+            WindowsUtils.applyStartup(s.autoStartWithWindows);
+        } catch (Throwable ignored) {
+        }
 
         lastApplied = new FxSettings(s);
     }
@@ -85,24 +87,33 @@ public final class AutomationService implements AutoCloseable {
 
         if (e != null) {
             e.shutdownNow();
-            try { e.awaitTermination(2, TimeUnit.SECONDS); }
-            catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            try {
+                e.awaitTermination(2, TimeUnit.SECONDS);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 
     @Override
-    public void close() { stop(); }
+    public void close() {
+        stop();
+    }
 
     // ===== Exception-safe wrappers =====
 
     private void safeRunFreeRam() {
-        try { runFreeRam(); }
-        catch (Throwable ignored) {}
+        try {
+            runFreeRam();
+        } catch (Throwable ignored) {
+        }
     }
 
     private void safeRunOptimizeDisk() {
-        try { runOptimizeDisk(); }
-        catch (Throwable ignored) {}
+        try {
+            runOptimizeDisk();
+        } catch (Throwable ignored) {
+        }
     }
 
     // ===== Tasks =====

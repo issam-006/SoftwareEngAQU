@@ -34,11 +34,18 @@ public final class RemoteConfig implements Serializable {
 
     private String scanAndFixScript;
 
-    public RemoteConfig() {}
+    public RemoteConfig() {
+    }
 
     // =========================================================================
     // Application Status and Version Methods
     // =========================================================================
+
+    private static String trimOrNull(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
+    }
 
     public String getAppStatus() {
         return appStatus;
@@ -95,16 +102,16 @@ public final class RemoteConfig implements Serializable {
         return appStatus != null && appStatus.equalsIgnoreCase("maintenance");
     }
 
+    // =========================================================================
+    // Script Accessor Methods
+    // =========================================================================
+
     /**
      * @return true if appStatus is null or "online"
      */
     public boolean isOnline() {
         return appStatus == null || appStatus.equalsIgnoreCase("online");
     }
-
-    // =========================================================================
-    // Script Accessor Methods
-    // =========================================================================
 
     public String getFreeRamScript() {
         return freeRamScript;
@@ -186,17 +193,11 @@ public final class RemoteConfig implements Serializable {
         return scanAndFixScript;
     }
 
-    public void setScanAndFixScript(String v) {
-        this.scanAndFixScript = trimOrNull(v);
-    }
-
     // =========================================================================
     // Utility Methods
     // =========================================================================
 
-    private static String trimOrNull(String s) {
-        if (s == null) return null;
-        String t = s.trim();
-        return t.isEmpty() ? null : t;
+    public void setScanAndFixScript(String v) {
+        this.scanAndFixScript = trimOrNull(v);
     }
 }

@@ -2,7 +2,6 @@ package fxShield.UI;
 
 import fxShield.WIN.AutomationService;
 import fxShield.WIN.FxSettings;
-import fxShield.WIN.SettingsStore;
 import javafx.animation.*;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -98,7 +97,7 @@ public final class SettingsDialog {
                     "-fx-effect: dropshadow(gaussian, rgba(37,99,235,0.32), 22, 0.22, 0, 0);";
 
     public static void show(Stage owner) {
-        FxSettings s = SettingsStore.load();
+        FxSettings s = FxSettings.load();
 
         Stage dialog = new Stage();
         if (owner != null) dialog.initOwner(owner);
@@ -171,7 +170,7 @@ public final class SettingsDialog {
 
             Thread t = new Thread(() -> {
                 try {
-                    SettingsStore.save(ns);
+                    FxSettings.save(ns);
                 } catch (Throwable ignored) {}
 
                 try {

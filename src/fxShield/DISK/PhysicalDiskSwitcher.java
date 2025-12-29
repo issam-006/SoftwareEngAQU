@@ -9,11 +9,7 @@ import javafx.application.Platform;
 import javafx.geometry.Pos;
 import javafx.geometry.Side;
 import javafx.scene.Node;
-import javafx.scene.control.Button;
-import javafx.scene.control.ContextMenu;
-import javafx.scene.control.CustomMenuItem;
-import javafx.scene.control.Label;
-import javafx.scene.control.MenuItem;
+import javafx.scene.control.*;
 import javafx.scene.input.KeyCode;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -25,28 +21,6 @@ import java.util.function.IntConsumer;
 
 public final class PhysicalDiskSwitcher {
 
-    private final HBox root;
-    private final Button pill;
-    private final HBox pillContent;
-    private final ContextMenu menu;
-
-    private final Label title;
-    private final Label arrow;
-
-    private int count;
-    private int selected; // -1 when no disks
-    private IntConsumer onSelect = i -> {};
-
-    // responsive flags (do NOT overwrite each other)
-    private boolean compactWanted = false;
-    private boolean veryCompactWanted = false;
-
-    // hover/menu state to keep pill style consistent (no padding jump)
-    private boolean hover = false;
-    private boolean menuShowing = false;
-
-    /* ================= iOS STYLES ================= */
-
     // (we will generate pill style dynamically to keep padding/border consistent per size)
     private static final String MENU_CARD =
             "-fx-background-color: rgba(15, 23, 42, 0.96);" +
@@ -56,14 +30,12 @@ public final class PhysicalDiskSwitcher {
                     "-fx-border-width: 1;" +
                     "-fx-border-radius: 16;" +
                     "-fx-effect: dropshadow(three-pass-box, rgba(0, 0, 0, 0.5), 20, 0, 0, 10);";
-
     private static final String TRANSPARENT_OVERRIDE =
             "-fx-background-color: transparent;" +
                     "-fx-background-insets: 0;" +
                     "-fx-padding: 0;" +
                     "-fx-border-width: 0;" +
                     "-fx-border-color: transparent;";
-
     private static final String ROW_NORMAL =
             "-fx-background-color: transparent;" +
                     "-fx-background-radius: 10;" +
@@ -72,7 +44,6 @@ public final class PhysicalDiskSwitcher {
                     "-fx-border-color: transparent;" +
                     "-fx-border-width: 2;" +
                     "-fx-border-radius: 10;";
-
     private static final String ROW_HOVER =
             "-fx-background-color: rgba(255, 255, 255, 0.12);" +
                     "-fx-background-radius: 10;" +
@@ -82,7 +53,6 @@ public final class PhysicalDiskSwitcher {
                     "-fx-border-width: 2;" +
                     "-fx-border-radius: 10;" +
                     "-fx-effect: dropshadow(gaussian, rgba(59, 130, 246, 0.4), 10, 0, 0, 0);";
-
     private static final String ROW_SELECTED =
             "-fx-background-color: linear-gradient(to right, rgba(59, 130, 246, 0.5), rgba(99, 102, 241, 0.5));" +
                     "-fx-background-radius: 10;" +
@@ -92,16 +62,32 @@ public final class PhysicalDiskSwitcher {
                     "-fx-border-radius: 10;" +
                     "-fx-cursor: hand;" +
                     "-fx-effect: dropshadow(gaussian, rgba(59, 130, 246, 0.3), 15, 0, 0, 0);";
-
     private static final String TXT =
             "-fx-text-fill: rgba(226, 232, 240, 1);" +
                     "-fx-font-size: 13;" +
                     "-fx-font-weight: 500;";
-
     private static final String CHECK_MARK =
             "-fx-text-fill: #3b82f6;" +
                     "-fx-font-size: 15;" +
                     "-fx-font-weight: 900;";
+    private final HBox root;
+    private final Button pill;
+    private final HBox pillContent;
+    private final ContextMenu menu;
+    private final Label title;
+    private final Label arrow;
+
+    /* ================= iOS STYLES ================= */
+    private int count;
+    private int selected; // -1 when no disks
+    private IntConsumer onSelect = i -> {
+    };
+    // responsive flags (do NOT overwrite each other)
+    private boolean compactWanted = false;
+    private boolean veryCompactWanted = false;
+    // hover/menu state to keep pill style consistent (no padding jump)
+    private boolean hover = false;
+    private boolean menuShowing = false;
 
     /* ================================================= */
 
@@ -208,6 +194,26 @@ public final class PhysicalDiskSwitcher {
         rebuildMenu();
     }
 
+    private static int clamp(int v, int min, int max) {
+        return Math.max(min, Math.min(max, v));
+    }
+
+    private static int digitToIndex(KeyCode code) {
+        return switch (code) {
+            case DIGIT0, NUMPAD0 -> 0;
+            case DIGIT1, NUMPAD1 -> 1;
+            case DIGIT2, NUMPAD2 -> 2;
+            case DIGIT3, NUMPAD3 -> 3;
+            case DIGIT4, NUMPAD4 -> 4;
+            case DIGIT5, NUMPAD5 -> 5;
+            case DIGIT6, NUMPAD6 -> 6;
+            case DIGIT7, NUMPAD7 -> 7;
+            case DIGIT8, NUMPAD8 -> 8;
+            case DIGIT9, NUMPAD9 -> 9;
+            default -> -1;
+        };
+    }
+
     private void applySkinStyles(ContextMenu menu) {
         Node skin = (menu.getSkin() != null) ? menu.getSkin().getNode() : null;
         if (skin == null) return;
@@ -219,9 +225,13 @@ public final class PhysicalDiskSwitcher {
                     ".root, .popup-container, .context-menu, .menu, .menu-item, .menu-item-container," +
                             ".scroll-pane, .viewport, .content, .corner, .list-view, .context-menu-container, .custom-menu-item"
             )) {
-                try { n.setStyle(TRANSPARENT_OVERRIDE); } catch (RuntimeException ignored) {}
+                try {
+                    n.setStyle(TRANSPARENT_OVERRIDE);
+                } catch (RuntimeException ignored) {
+                }
             }
-        } catch (RuntimeException ignored) {}
+        } catch (RuntimeException ignored) {
+        }
 
         skin.setOpacity(0);
         skin.setTranslateY(-10);
@@ -333,7 +343,10 @@ public final class PhysicalDiskSwitcher {
     private void refresh() {
         rebuildMenu();
         if (count > 0 && selected >= 0) {
-            try { onSelect.accept(selected); } catch (Exception ignored) {}
+            try {
+                onSelect.accept(selected);
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -383,47 +396,20 @@ public final class PhysicalDiskSwitcher {
         pill.setStyle(base);
     }
 
-    private static int clamp(int v, int min, int max) {
-        return Math.max(min, Math.min(max, v));
-    }
-
-    private static int digitToIndex(KeyCode code) {
-        return switch (code) {
-            case DIGIT0, NUMPAD0 -> 0;
-            case DIGIT1, NUMPAD1 -> 1;
-            case DIGIT2, NUMPAD2 -> 2;
-            case DIGIT3, NUMPAD3 -> 3;
-            case DIGIT4, NUMPAD4 -> 4;
-            case DIGIT5, NUMPAD5 -> 5;
-            case DIGIT6, NUMPAD6 -> 6;
-            case DIGIT7, NUMPAD7 -> 7;
-            case DIGIT8, NUMPAD8 -> 8;
-            case DIGIT9, NUMPAD9 -> 9;
-            default -> -1;
-        };
-    }
-
     /* ================= API ================= */
 
-    public HBox getRoot() { return root; }
+    public HBox getRoot() {
+        return root;
+    }
 
     public void setOnSelect(IntConsumer c) {
-        this.onSelect = (c != null) ? c : i -> {};
+        this.onSelect = (c != null) ? c : i -> {
+        };
     }
 
     public void setCount(int c) {
         count = Math.max(0, c);
         selected = (count > 0) ? 0 : -1;
-        refresh();
-    }
-
-    public void setSelectedIndex(int idx) {
-        if (count <= 0) {
-            selected = -1;
-            rebuildMenu();
-            return;
-        }
-        selected = clamp(idx, 0, count - 1);
         refresh();
     }
 
@@ -439,5 +425,17 @@ public final class PhysicalDiskSwitcher {
         applyResponsive();
     }
 
-    public int getSelectedIndex() { return selected; }
+    public int getSelectedIndex() {
+        return selected;
+    }
+
+    public void setSelectedIndex(int idx) {
+        if (count <= 0) {
+            selected = -1;
+            rebuildMenu();
+            return;
+        }
+        selected = clamp(idx, 0, count - 1);
+        refresh();
+    }
 }
